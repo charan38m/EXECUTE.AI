@@ -1,0 +1,23 @@
+{
+  "summary": "Re-ran public backend regression tests and a 390x844 Expo web smoke flow. All three API tests passed; Speak screen loaded and microphone tap entered Listening without visible errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_execute_ai_api.py", "/app/test_reports/pytest/pytest_results.xml", "/app/test_reports/browser/iteration2_speak.png"],
+  "action_items": ["Re-run the full recording-to-task-to-session-to-card flow on a device/browser with microphone and sharing permissions available."],
+  "critical_code_review_comments": ["AI serialization and bounded retries are present; repeated task and sort API tests passed.", "PostHog is disabled safely with a blank key.", "Interactive controls have testIDs and minimum touch sizing; no horizontal overflow was observed in the tested viewport."],
+  "updated_files": ["/app/backend/tests/test_execute_ai_api.py", "/app/test_reports/pytest/pytest_results.xml", "/app/test_reports/iteration_2.json", "/app/test_reports/browser/iteration2_speak.png"],
+  "success_rate": {"backend": "100% (3/3)", "frontend": "100% for smoke scope (load and mic tap)"},
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_call_test_agent_after_fix": true,
+  "context_for_next_testing_agent": "The workspace uses EXPO_PUBLIC_BACKEND_URL rather than EXPO_BACKEND_URL; the regression test now accepts either variable. Full AI recording and card sharing were not replayed in this iteration.",
+  "rca_of_issue": "Initial pytest invocation had no backend URL exported in the shell, causing requests to target '/api/*' and fail before reaching the service. The reusable test now supports the configured public variable; with the URL supplied, all tests passed. No APIs were mocked."
+}
