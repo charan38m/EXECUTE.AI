@@ -29,6 +29,13 @@ Execute AI helps overwhelmed students, founders, and knowledge workers regain fo
 - Added anonymous local identity/history and env-gated PostHog events: `first_open`, `session_started`, `session_completed`, `interruption_captured`, and `card_shared`.
 - Verified TypeScript, JavaScript lint, Python lint/compile, public backend regression (3/3), and 390×844 preview smoke. Physical permission-enabled recording/share should receive a device pass.
 
+## Refinements — 2026-09-04
+- Updated session capture input to a black, borderless field with only a thin grey underline and removed browser focus outlines.
+- Capture state now supports unlimited entries, clears immediately on submit, and reports “saved for later” without showing the captured list.
+- Added “Not this one?” alternative task navigation while preserving rejected/deferred tasks for the final card.
+- End card now separates captured count from deferred count, computes time saved from both, always renders NOW/LATER/DROP headings, and keeps item text out of the shared 9:16 PNG.
+- Tightened Gemini sorting guidance and server-side preservation so every captured/deferred item is represented exactly once, defaulting unmatched items to LATER.
+
 ## Prioritized backlog
 
 ### P0

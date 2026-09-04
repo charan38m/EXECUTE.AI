@@ -1,0 +1,37 @@
+{
+  "summary": "Live Expo smoke and backend API regression passed. Speak screen loaded at 390x844, mic tap entered Listening without a red screen, task returned alternatives, and sorting preserved every input item.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_execute_ai_api.py",
+    "/app/test_reports/pytest/pytest_results_iter3.xml",
+    "/app/test_reports/browser/iteration3/speak.png"
+  ],
+  "action_items": [
+    "Run a native Android recording/session retest to verify microphone upload and end-card flows, which cannot be completed reliably in this web smoke run."
+  ],
+  "critical_code_review_comments": [
+    "Frontend resolves EXPO_PUBLIC_BACKEND_URL (and an Expo extra key) rather than the requested EXPO_BACKEND_URL name; current configured environment works, but naming should remain intentional and documented."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_execute_ai_api.py",
+    "/app/test_reports/iteration_3.json"
+  ],
+  "success_rate": {
+    "backend": "100% (3/3)",
+    "frontend": "100% smoke (load, mic tap, no red screen); full session/card not executed"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_call_test_agent_after_fix": true,
+  "context_for_next_testing_agent": "Web preview passed initial speak/mic smoke at 390x844. Backend task produced 2 alternatives and sort preserved all 3 supplied items, defaulting unmatched items to LATER. Native recording, delayed Start, Not this one?, unlimited captures, timer completion, card ordering, and PNG contents remain unverified.",
+  "rca_of_issue": "Initial pytest failures were test-environment setup failures: the test read EXPO_BACKEND_URL, but that variable was not exported to the shell while the configured frontend env contains EXPO_PUBLIC_BACKEND_URL. Loading /app/frontend/.env in the regression test resolved the invalid '/api/' URL; all 3 tests then passed. No product failure was observed."
+}

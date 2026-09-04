@@ -19,10 +19,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  type TextStyle,
   type TextInputSubmitEditingEvent,
 } from "react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -31,9 +33,11 @@ import type { RefObject } from "react";
 import { storage } from "@/src/utils/storage";
 
 type Phase = "speak" | "processing" | "thing" | "session" | "card";
-type Task = { task: string; minutes: number; deferred: string[]; reason: string };
+type Alternative = { task: string; minutes: number; reason: string };
+type Task = { task: string; minutes: number; deferred: string[]; reason: string; alternatives: Alternative[] };
 type Sorted = { now: string[]; later: string[]; drop: string[] };
-type SessionCard = { task: string; durationSeconds: number; interruptions: string[]; sorted: Sorted };
+type SessionCard = { task: string; durationSeconds: number; interruptions: string[]; deferredItems: string[]; sorted: Sorted };
+const webInputStyle = { outlineStyle: "none" } as unknown as TextStyle;
 
 const BACKEND_URL = (
   Constants.expoConfig?.extra?.backendUrl ?? process.env.EXPO_PUBLIC_BACKEND_URL ?? ""
@@ -123,7 +127,7 @@ function ProcessingScreen() {
   return <View style={styles.centerScreen} testID="processing-screen"><QuietDot /></View>;
 }
 
-function ThingScreen({ task, onStart, insets }: { task: Task; onStart: () => void; insets: { bottom: number } }) {
+function ThingScreen({ task, onStart, onNotThisOne, insets }: { task: Task; onStart: () => void; onNotThisOne: () => void; insets: { bottom: number } }) {
   const fade = useRef(new Animated.Value(0)).current;
   const [ready, setReady] = useState(false);
   useEffect(() => {
@@ -137,10 +141,11 @@ function ThingScreen({ task, onStart, insets }: { task: Task; onStart: () => voi
     <View style={styles.centerScreen} testID="thing-screen">
       <Text style={styles.taskText}>{task.task}</Text>
       <Text style={styles.reason}>{task.reason}</Text>
-      <Animated.View style={[styles.startAnchor, { bottom: insets.bottom + 32, opacity: fade }]}>
+      <Animated.View style={[styles.startAnchor, { bottom: insets.bottom + 24, opacity: fade }]}>
         <Pressable testID="start-button" disabled={!ready} onPress={onStart} style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}>
           <Text style={styles.startText}>Start</Text>
         </Pressable>
+        {task.alternatives.length > 0 ? <Pressable testID="not-this-one" disabled={!ready} onPress={onNotThisOne} style={({ pressed }) => [styles.notThisOneButton, pressed && styles.pressed]}><Text style={styles.notThisOneText}>Not this one?</Text></Pressable> : null}
       </Animated.View>
     </View>
   );
@@ -156,10 +161,10 @@ function SessionScreen({ task, remaining, plannedSeconds, count, onSubmit, onEnd
       <Text style={[styles.sessionTask, { marginTop: insets.top + 16 }]} numberOfLines={2}>{task.task}</Text>
       <View style={styles.sessionCenter}>
         <TimerRing progress={progress} value={formatTimer(remaining)} />
-        {count > 0 ? <Text style={styles.deflected}>{count} deflected</Text> : null}
+        {count > 0 ? <Text style={styles.deflected}>{count} saved for later</Text> : null}
       </View>
       <View style={[styles.sessionBottom, { paddingBottom: insets.bottom + 20 }]}>
-        <TextInput testID="interruption-input" value={draft} onChangeText={setDraft} onSubmitEditing={onSubmit} onBlur={Keyboard.dismiss} returnKeyType="done" placeholder="Something came up?" placeholderTextColor="#6B7280" style={styles.captureInput} blurOnSubmit={false} />
+        <TextInput testID="interruption-input" value={draft} onChangeText={setDraft} onSubmitEditing={onSubmit} onBlur={Keyboard.dismiss} returnKeyType="done" placeholder="Something came up?" placeholderTextColor="#6B7280" style={[styles.captureInput, Platform.OS === "web" ? webInputStyle : null]} blurOnSubmit={false} />
         <Pressable testID="end-early" onPress={onEnd} style={({ pressed }) => [styles.endLink, pressed && styles.pressed]}><Text style={styles.endText}>End early</Text></Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -167,29 +172,28 @@ function SessionScreen({ task, remaining, plannedSeconds, count, onSubmit, onEnd
 }
 
 function Group({ title, items }: { title: string; items: string[] }) {
-  if (items.length === 0) return null;
   return <View style={styles.group}><Text style={styles.groupTitle}>{title}</Text>{items.map((item, index) => <Text key={`${item}-${index}`} style={styles.groupItem}>{item}</Text>)}</View>;
 }
 
 function CardScreen({ card, insets, cardRef, onShare }: { card: SessionCard; insets: { top: number; bottom: number }; cardRef: RefObject<View | null>; onShare: () => void }) {
-  const saved = card.interruptions.length * 23;
+  const saved = (card.interruptions.length + card.deferredItems.length) * 23;
   return (
-    <View style={[styles.cardScreen, { paddingTop: insets.top, paddingBottom: insets.bottom }]} testID="card-screen">
-      <View ref={cardRef} collapsable={false} style={styles.cardCanvas}>
+    <ScrollView style={styles.cardScreen} contentContainerStyle={[styles.cardContent, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 }]} testID="card-screen">
+      <View ref={cardRef} collapsable={false} style={styles.shareCanvas}>
         <View style={styles.cardStats}>
           <Text style={styles.cardTask}>{card.task}</Text>
           <Text style={styles.cardNumber}>{formatDuration(card.durationSeconds)}</Text>
           <Text style={styles.cardLabel}>focused</Text>
           <Text style={styles.cardNumber}>{card.interruptions.length}</Text>
-          <Text style={styles.cardLabel}>interruptions deflected</Text>
+          <Text style={styles.cardLabel}>captured</Text>
           <Text style={styles.savedNumber}>{formatDuration(saved * 60)}</Text>
           <Text style={styles.cardLabel}>time saved</Text>
         </View>
-        <View style={styles.groups}><Group title="NOW" items={card.sorted.now} /><Group title="LATER" items={card.sorted.later} /><Group title="DROP" items={card.sorted.drop} /></View>
         <Text style={styles.wordmark}>Execute AI</Text>
       </View>
+      <View style={styles.groups}><Group title="NOW" items={card.sorted.now} /><Group title="LATER" items={card.sorted.later} /><Group title="DROP" items={card.sorted.drop} /></View>
       <Pressable testID="share-button" onPress={onShare} style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}><Text style={styles.shareText}>Share</Text></Pressable>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -291,27 +295,36 @@ export default function Index() {
     track("session_started", anonymousId, { task: task.task, planned_minutes: task.minutes });
   };
 
+  const chooseNextTask = () => {
+    if (!task || task.alternatives.length === 0) return;
+    const [next, ...remainingAlternatives] = task.alternatives;
+    const nextDeferred = [...task.deferred.filter((item) => item !== next.task), task.task];
+    setTask({ ...next, deferred: nextDeferred, alternatives: remainingAlternatives });
+  };
+
   const finishSession = useCallback(async () => {
     if (!task || endingSession.current) return;
     endingSession.current = true;
     const elapsed = Math.max(1, Math.min(plannedSeconds, Math.floor((Date.now() - sessionStartedAt.current) / 1000)));
     setPhase("processing");
     let sorted: Sorted = { now: [], later: [], drop: [] };
-    if (interruptions.length > 0) {
+    const deferredItems = task.deferred;
+    const itemsToSort = [...interruptions, ...deferredItems];
+    if (itemsToSort.length > 0) {
       try {
-        sorted = await parseResponse<Sorted>(await fetch(`${BACKEND_URL}/api/ai/sort`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task: task.task, interruptions }) }));
+        sorted = await parseResponse<Sorted>(await fetch(`${BACKEND_URL}/api/ai/sort`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task: task.task, interruptions: itemsToSort }) }));
       } catch {
-        sorted = { now: interruptions, later: [], drop: [] };
+        sorted = { now: [], later: itemsToSort, drop: [] };
       }
     }
-    const nextCard = { task: task.task, durationSeconds: elapsed, interruptions, sorted };
+    const nextCard = { task: task.task, durationSeconds: elapsed, interruptions, deferredItems, sorted };
     const historyRaw = await storage.getItem(HISTORY_KEY, "[]");
     let history: unknown[] = [];
     try { history = JSON.parse(historyRaw || "[]") as unknown[]; } catch { history = []; }
     await storage.setItem(HISTORY_KEY, JSON.stringify([...history, { ...nextCard, completedAt: new Date().toISOString() }]));
     setCard(nextCard);
     setPhase("card");
-    track("session_completed", anonymousId, { duration_seconds: elapsed, interruptions: interruptions.length });
+    track("session_completed", anonymousId, { duration_seconds: elapsed, captured: interruptions.length, deferred: deferredItems.length });
   }, [anonymousId, interruptions, plannedSeconds, task]);
 
   useEffect(() => {
@@ -336,12 +349,12 @@ export default function Index() {
     if (!cardRef.current || !(await Sharing.isAvailableAsync())) return;
     const uri = await captureRef(cardRef.current, { format: "png", quality: 1, result: "tmpfile", width: 360, height: 640 });
     await Sharing.shareAsync(uri, { mimeType: "image/png", dialogTitle: "Share your Execute AI session" });
-    track("card_shared", anonymousId, { interruptions: card?.interruptions.length ?? 0 });
+    track("card_shared", anonymousId, { captured: card?.interruptions.length ?? 0, deferred: card?.deferredItems.length ?? 0 });
   };
 
   let content = <ProcessingScreen />;
   if (phase === "speak") content = <SpeakScreen recording={recording} amplitude={amplitude} onPress={handleMic} error={error} />;
-  if (phase === "thing" && task) content = <ThingScreen task={task} onStart={startSession} insets={insets} />;
+  if (phase === "thing" && task) content = <ThingScreen task={task} onStart={startSession} onNotThisOne={chooseNextTask} insets={insets} />;
   if (phase === "session" && task) content = <SessionScreen task={task} remaining={remaining} plannedSeconds={plannedSeconds} count={interruptions.length} onSubmit={addInterruption} onEnd={() => void finishSession()} draft={draft} setDraft={setDraft} insets={insets} />;
   if (phase === "card" && card) content = <CardScreen card={card} insets={insets} cardRef={cardRef} onShare={() => void shareCard()} />;
   return <View style={styles.root}>{content}</View>;
@@ -360,6 +373,8 @@ const styles = StyleSheet.create({
   startAnchor: { position: "absolute", left: 0, right: 0, alignItems: "center" },
   textButton: { minHeight: 44, minWidth: 80, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 },
   startText: { color: "#FFFFFF", fontSize: 16, fontWeight: "300" },
+  notThisOneButton: { minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 2 },
+  notThisOneText: { color: "#6B7280", fontSize: 13, fontWeight: "300" },
   sessionScreen: { flex: 1, backgroundColor: "#000000", paddingHorizontal: 32 },
   sessionTask: { color: "#6B7280", fontSize: 14, fontWeight: "300", textAlign: "center", minHeight: 40 },
   sessionCenter: { flex: 1, alignItems: "center", justifyContent: "center" },
@@ -367,11 +382,12 @@ const styles = StyleSheet.create({
   timerValue: { position: "absolute", color: "#FFFFFF", fontSize: 64, lineHeight: 72, fontWeight: "300", fontVariant: ["tabular-nums"], letterSpacing: -2 },
   deflected: { color: "#6B7280", fontSize: 13, fontWeight: "300", marginTop: 26 },
   sessionBottom: { alignItems: "center" },
-  captureInput: { width: "100%", minHeight: 48, color: "#FFFFFF", fontSize: 16, fontWeight: "300", textAlign: "center", paddingHorizontal: 4, paddingVertical: 10 },
+  captureInput: { width: "100%", minHeight: 48, color: "#FFFFFF", fontSize: 16, fontWeight: "300", textAlign: "center", paddingHorizontal: 4, paddingVertical: 10, borderWidth: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#6B7280" },
   endLink: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, marginTop: 18 },
   endText: { color: "#6B7280", fontSize: 13, fontWeight: "300" },
-  cardScreen: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#000000" },
-  cardCanvas: { width: 360, height: 640, maxWidth: "100%", backgroundColor: "#000000", paddingHorizontal: 32, paddingVertical: 34, justifyContent: "space-between" },
+  cardScreen: { flex: 1, backgroundColor: "#000000" },
+  cardContent: { alignItems: "center", width: "100%" },
+  shareCanvas: { width: 360, height: 640, maxWidth: "100%", backgroundColor: "#000000", paddingHorizontal: 32, paddingVertical: 34, justifyContent: "space-between" },
   cardStats: { alignItems: "center", paddingTop: 12 },
   cardTask: { color: "#6B7280", fontSize: 14, fontWeight: "300", textAlign: "center", marginBottom: 22 },
   cardNumber: { color: "#FFFFFF", fontSize: 48, lineHeight: 54, fontWeight: "300", letterSpacing: -1.8 },

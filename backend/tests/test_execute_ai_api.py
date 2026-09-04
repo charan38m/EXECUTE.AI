@@ -1,6 +1,8 @@
 import os
 import requests
+from dotenv import load_dotenv
 
+load_dotenv("/app/frontend/.env")
 BASE_URL = (os.environ.get("EXPO_BACKEND_URL") or os.environ.get("EXPO_PUBLIC_BACKEND_URL", "")).rstrip("/")
 
 

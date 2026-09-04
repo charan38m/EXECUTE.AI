@@ -56,11 +56,18 @@ class TaskRequest(BaseModel):
     transcript: str
 
 
+class AlternativeTask(BaseModel):
+    task: str
+    minutes: int
+    reason: str
+
+
 class TaskResponse(BaseModel):
     task: str
     minutes: int
     deferred: List[str]
     reason: str
+    alternatives: List[AlternativeTask] = Field(default_factory=list)
 
 
 class SortRequest(BaseModel):
@@ -182,7 +189,11 @@ Never return more than one task."""
         reason = limit_words(payload.get("reason", ""), 12)[:120]
         if not task:
             raise ValueError("missing task")
-        return TaskResponse(task=task, minutes=minutes, deferred=deferred, reason=reason)
+        alternatives = [
+            AlternativeTask(task=item, minutes=minutes, reason="Next priority")
+            for item in deferred
+        ]
+        return TaskResponse(task=task, minutes=minutes, deferred=deferred, reason=reason, alternatives=alternatives)
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=502, detail="Gemini returned an unusable task") from exc
 
@@ -191,9 +202,10 @@ Never return more than one task."""
 async def sort_interruptions(request: SortRequest):
     if not request.interruptions:
         return SortResponse(now=[], later=[], drop=[])
-    system_message = """Sort each item into exactly one of NOW, LATER, DROP. Return only JSON:
-{"now":[],"later":[],"drop":[]}. DROP means it will not matter in a week.
-Preserve each interruption's original wording and include every item exactly once."""
+    system_message = """Sort each item into NOW, LATER, or DROP. Default to LATER. Only use DROP if
+the item is clearly trivial and time-bound in a way that has already passed. Never drop anything
+that could be a real task or commitment. Return only JSON: {"now":[],"later":[],"drop":[]}.
+Preserve every item's original wording and include every input item exactly once."""
     prompt = json.dumps({"task": request.task, "interruptions": request.interruptions}, ensure_ascii=False)
     payload = parse_json_object(await run_gemini(system_message, UserMessage(text=prompt)))
     try:
