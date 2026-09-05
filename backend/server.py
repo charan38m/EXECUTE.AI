@@ -177,15 +177,15 @@ async def choose_task(request: TaskRequest):
         raise HTTPException(status_code=400, detail="Transcript is required")
     system_message = """You receive a person's spoken, unstructured list of everything on their mind.
 Return ONLY valid JSON, no markdown, no preamble:
-{"task":"<single most important task, max 8 words, in the language the user spoke>","minutes":<realistic integer>,"deferred":["<other items>"],"reason":"<max 12 words on why this one first>"}
+{"task":"<single most important task, max 8 words, in the language the user spoke>","minutes":<realistic integer>,"deferred":["<other items, EACH one a short task phrase max 6 words, never a raw sentence>"],"reason":"<max 12 words on why this one first>"}
 Choose by: hard deadlines first, then highest consequence if missed, then what unblocks other work.
-Never return more than one task."""
+Never return more than one task. Every deferred item must be a concise action phrase, not a copy of the transcript."""
     raw = await run_gemini(system_message, UserMessage(text=request.transcript))
     payload = parse_json_object(raw)
     try:
         task = limit_words(payload["task"], 8)[:100]
         minutes = max(1, min(int(payload["minutes"]), 480))
-        deferred = [str(item).strip() for item in payload.get("deferred", []) if str(item).strip()]
+        deferred = [limit_words(item, 6)[:60] for item in payload.get("deferred", []) if str(item).strip()]
         reason = limit_words(payload.get("reason", ""), 12)[:120]
         if not task:
             raise ValueError("missing task")
@@ -205,8 +205,9 @@ async def sort_interruptions(request: SortRequest):
     system_message = """Sort each item into NOW, LATER, or DROP. Default to LATER. Only use DROP if
 the item is clearly trivial and time-bound in a way that has already passed. Never drop anything
 that could be a real task or commitment. Return only JSON: {"now":[],"later":[],"drop":[]}.
-Preserve every item's original wording and include every input item exactly once."""
-    prompt = json.dumps({"task": request.task, "interruptions": request.interruptions}, ensure_ascii=False)
+Preserve each item's original wording and include every input item exactly once."""
+    trimmed = [limit_words(item, 6)[:60] for item in request.interruptions]
+    prompt = json.dumps({"task": request.task, "interruptions": trimmed}, ensure_ascii=False)
     payload = parse_json_object(await run_gemini(system_message, UserMessage(text=prompt)))
     try:
         buckets = {
@@ -215,7 +216,7 @@ Preserve every item's original wording and include every input item exactly once
             "drop": [str(item).strip() for item in payload.get("drop", []) if str(item).strip()],
         }
         response: dict[str, List[str]] = {"now": [], "later": [], "drop": []}
-        for original in request.interruptions:
+        for original in trimmed:
             match = next(
                 (bucket for bucket, values in buckets.items() if normalized_text(original) in {normalized_text(value) for value in values}),
                 "later",

@@ -42,6 +42,14 @@ Execute AI helps overwhelmed students, founders, and knowledge workers regain fo
 - Lifted the selected minutes value into the `onStart` callback so the Session countdown honors the user's adjusted duration (was previously locked to Gemini's suggestion).
 - Rebalanced the share-canvas layout: `cardStats` uses `flex:1, justifyContent:'center'` and the canvas no longer uses `space-between`, closing the large empty strip between stats and the "Execute AI" wordmark while keeping the wordmark at the bottom of the 9:16 PNG.
 
+## Refinements — 2026-09-05 (bug batch)
+- Rebuilt the end card as a single, no-scroll screen: task title → focused/captured/time-saved stats → "based on UC Irvine interruption research" note → capped list (max 4 items across NOW+LATER, then "+N more") → wordmark → Share button. DROP items are intentionally hidden.
+- Fixed the time-saved formula: `savedMinutes = interruptions.length × 23`. Deferred items from the initial voice dump no longer inflate the number, so a session with 0 captures shows "0m" and 7 captures shows "2h 41m".
+- Moved the "Execute AI" wordmark to the very bottom of the end card, small grey (#6B7280), letter-spaced, using `marginTop:'auto'` so it always docks to the bottom regardless of list length.
+- Fixed the Share button crash: `captureRef` output is now prefixed with `file://` before being passed to `Sharing.shareAsync`, share flow is wrapped in try/catch, and web falls back to `navigator.share` when available.
+- Task screen: task title auto-scales (`adjustsFontSizeToFit`, `numberOfLines=3`, `minimumFontScale=0.55`) so long tasks fit; minutes selector and Start button live in the same bottom anchor with a 36px spacer; minutes value has fixed min-width, centered text, and re-mounts via `key` on change so "60 → 120" no longer overlaps.
+- Backend now caps every `deferred` item and every `interruptions` item at 6 words / 60 chars via `limit_words`, and the extraction prompt explicitly forbids raw transcript sentences in the deferred array. Sort endpoint uses the trimmed inputs so NOW/LATER items are always short.
+
 ## Prioritized backlog
 
 ### P0

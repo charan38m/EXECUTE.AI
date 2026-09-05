@@ -101,6 +101,56 @@ def test_transcribe_empty_audio_returns_400():
     assert response.status_code == 400
 
 
+def test_task_deferred_items_are_capped_to_six_words():
+    # Transcript designed to force multiple deferred sub-tasks that Gemini might phrase verbosely.
+    long_prompt = (
+        "I have to finish the quarterly investor deck by tomorrow morning, "
+        "and I also need to renew my passport before the trip next month, "
+        "call the plumber about the kitchen sink that has been leaking for two weeks, "
+        "reply to seventeen recruiter emails that have been sitting in my inbox, "
+        "and pick up dry cleaning from the shop near the office before it closes"
+    )
+    response = requests.post(
+        f"{BASE_URL}/api/ai/task",
+        json={"transcript": long_prompt},
+        timeout=120,
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    for item in payload.get("deferred", []):
+        assert isinstance(item, str) and item
+        assert len(item.split()) <= 6, f"deferred item exceeds 6 words: {item!r}"
+        assert len(item) <= 60, f"deferred item exceeds 60 chars: {item!r}"
+    for alt in payload.get("alternatives", []):
+        alt_task = alt.get("task", "")
+        assert len(alt_task.split()) <= 6, f"alternative task exceeds 6 words: {alt_task!r}"
+
+
+def test_sort_trims_long_interruption_and_returns_six_word_bucket_item():
+    long_item = "I really need to remember to call the dentist about the appointment tomorrow morning"
+    short_items = ["Buy socks", "Water plants"]
+    response = requests.post(
+        f"{BASE_URL}/api/ai/sort",
+        json={"task": "Ship investor deck", "interruptions": [long_item, *short_items]},
+        timeout=90,
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    union = payload["now"] + payload["later"] + payload["drop"]
+    # Every returned bucket item must be <=6 words and <=60 chars.
+    for item in union:
+        assert len(item.split()) <= 6, f"bucket item exceeds 6 words: {item!r}"
+        assert len(item) <= 60
+    # The long input should appear trimmed to its first 6 words, not the full sentence.
+    trimmed_long = " ".join(long_item.split()[:6])
+    assert trimmed_long in union, f"trimmed long item missing from union: {union}"
+    # Short items are already <=6 words and must round-trip unchanged.
+    for short in short_items:
+        assert short in union, f"short item lost: {short} vs {union}"
+    # No extra items introduced.
+    assert len(union) == 3
+
+
 def test_transcribe_happy_path_returns_transcript_string():
     response = requests.post(
         f"{BASE_URL}/api/ai/transcribe",

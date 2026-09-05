@@ -19,7 +19,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -179,13 +178,18 @@ function ThingScreen({ task, onStart, onNotThisOne, insets }: { task: Task; onSt
     setMinutes(minuteOptions[nextIndex >= 0 && nextIndex < minuteOptions.length ? nextIndex : 0]);
   };
   return (
-    <View style={styles.centerScreen} testID="thing-screen">
-      <Text style={styles.taskText}>{task.task}</Text>
-      <Text style={styles.reason}>{task.reason}</Text>
-      <Pressable testID="minutes-selector" accessibilityRole="button" accessibilityLabel="Adjust focus minutes" onPress={adjustMinutes} disabled={!ready} style={({ pressed }) => [styles.minutesButton, pressed && styles.pressed]}>
-        <Text style={styles.minutesValue}>{minutes} min</Text>
-      </Pressable>
-      <Animated.View style={[styles.startAnchor, { bottom: insets.bottom + 24, opacity: fade }]}>
+    <View style={styles.thingScreen} testID="thing-screen">
+      <View style={styles.thingCenter}>
+        <Text style={styles.taskText} numberOfLines={3} adjustsFontSizeToFit minimumFontScale={0.55} allowFontScaling>
+          {task.task}
+        </Text>
+        <Text style={styles.reason} numberOfLines={2}>{task.reason}</Text>
+      </View>
+      <Animated.View style={[styles.startAnchor, { bottom: insets.bottom + 32, opacity: fade }]}>
+        <Pressable testID="minutes-selector" accessibilityRole="button" accessibilityLabel="Adjust focus minutes" onPress={adjustMinutes} disabled={!ready} style={({ pressed }) => [styles.minutesButton, pressed && styles.pressed]}>
+          <Text key={`minutes-${minutes}`} style={styles.minutesValue} numberOfLines={1}>{minutes} min</Text>
+        </Pressable>
+        <View style={styles.startSpacer} />
         <Pressable testID="start-button" disabled={!ready} onPress={() => onStart(minutes)} style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}>
           <Text style={styles.startText}>Start</Text>
         </Pressable>
@@ -215,30 +219,42 @@ function SessionScreen({ task, remaining, plannedSeconds, count, onSubmit, onEnd
   );
 }
 
-function Group({ title, items }: { title: string; items: string[] }) {
-  if (items.length === 0) return null;
-  return <View style={styles.group}><Text style={styles.groupTitle}>{title}</Text>{items.map((item, index) => <Text key={`${item}-${index}`} style={styles.groupItem}>{item}</Text>)}</View>;
-}
-
 function CardScreen({ card, insets, cardRef, onShare }: { card: SessionCard; insets: { top: number; bottom: number }; cardRef: RefObject<View | null>; onShare: () => void }) {
-  const saved = (card.interruptions.length + card.deferredItems.length) * 23;
+  const savedMinutes = card.interruptions.length * 23;
+  const savedText = savedMinutes === 0 ? "0m" : formatDuration(savedMinutes * 60);
+  const listItems: { label: string; text: string }[] = [
+    ...card.sorted.now.map((text) => ({ label: "NOW", text })),
+    ...card.sorted.later.map((text) => ({ label: "LATER", text })),
+  ];
+  const visibleItems = listItems.slice(0, 4);
+  const extra = listItems.length - visibleItems.length;
   return (
-    <ScrollView style={styles.cardScreen} contentContainerStyle={[styles.cardContent, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 }]} testID="card-screen">
-      <View ref={cardRef} collapsable={false} style={styles.shareCanvas}>
-        <View style={styles.cardStats}>
-          <Text style={styles.cardTask}>{card.task}</Text>
+    <View style={[styles.cardScreen, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 }]} testID="card-screen">
+      <View ref={cardRef} collapsable={false} style={styles.shareBody}>
+        <Text style={styles.cardTask} numberOfLines={2}>{card.task}</Text>
+        <View style={styles.statsBlock}>
           <Text style={styles.cardNumber}>{formatDuration(card.durationSeconds)}</Text>
           <Text style={styles.cardLabel}>focused</Text>
           <Text style={styles.cardNumber}>{card.interruptions.length}</Text>
           <Text style={styles.cardLabel}>captured</Text>
-          <Text style={styles.savedNumber}>{formatDuration(saved * 60)}</Text>
+          <Text style={styles.savedNumber}>{savedText}</Text>
           <Text style={styles.cardLabel}>time saved</Text>
+          <Text style={styles.researchNote}>based on UC Irvine interruption research</Text>
+        </View>
+        <View style={styles.listBlock}>
+          {visibleItems.map((item, index) => (
+            <Text key={`${item.label}-${index}`} style={styles.listItem} numberOfLines={1}>
+              <Text style={styles.listLabel}>{item.label}  </Text>{item.text}
+            </Text>
+          ))}
+          {extra > 0 ? <Text style={styles.moreItems}>+{extra} more</Text> : null}
         </View>
         <Text style={styles.wordmark}>Execute AI</Text>
       </View>
-      <View style={styles.groups}><Group title="NOW" items={card.sorted.now} /><Group title="LATER" items={card.sorted.later} /><Group title="DROP" items={card.sorted.drop} /></View>
-      <Pressable testID="share-button" onPress={onShare} style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}><Text style={styles.shareText}>Share</Text></Pressable>
-    </ScrollView>
+      <Pressable testID="share-button" onPress={onShare} style={({ pressed }) => [styles.shareButton, pressed && styles.pressed]}>
+        <Text style={styles.shareText}>Share</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -410,10 +426,21 @@ export default function Index() {
   };
 
   const shareCard = async () => {
-    if (!cardRef.current || !(await Sharing.isAvailableAsync())) return;
-    const uri = await captureRef(cardRef.current, { format: "png", quality: 1, result: "tmpfile", width: 360, height: 640 });
-    await Sharing.shareAsync(uri, { mimeType: "image/png", dialogTitle: "Share your Execute AI session" });
-    track("card_shared", anonymousId, { captured: card?.interruptions.length ?? 0, deferred: card?.deferredItems.length ?? 0 });
+    if (!cardRef.current) return;
+    try {
+      const rawUri = await captureRef(cardRef.current, { format: "png", quality: 1, result: "tmpfile" });
+      const uri = rawUri.startsWith("file://") ? rawUri : `file://${rawUri}`;
+      if (Platform.OS !== "web" && (await Sharing.isAvailableAsync())) {
+        await Sharing.shareAsync(uri, { mimeType: "image/png", dialogTitle: "Share your Execute AI session" });
+      } else if (Platform.OS === "web" && typeof navigator !== "undefined" && navigator.share) {
+        const blob = await (await fetch(uri)).blob();
+        const file = new File([blob], "execute-ai.png", { type: "image/png" });
+        await navigator.share({ files: [file], title: "Execute AI" }).catch(() => undefined);
+      }
+      track("card_shared", anonymousId, { captured: card?.interruptions.length ?? 0, deferred: card?.deferredItems.length ?? 0 });
+    } catch (shareError) {
+      setError(shareError instanceof Error ? shareError.message : "Could not share the card");
+    }
   };
 
   let content = <ProcessingScreen />;
@@ -434,8 +461,11 @@ const styles = StyleSheet.create({
   centerScreen: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   prompt: { color: "#6B7280", fontSize: 14, fontWeight: "300", letterSpacing: 0.1, marginBottom: 42, textAlign: "center" },
   tagline: { color: "#6B7280", fontSize: 13, fontWeight: "300", letterSpacing: 0.2, marginTop: 42, textAlign: "center" },
-  minutesButton: { minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, paddingVertical: 8, marginTop: 28 },
-  minutesValue: { color: "#FFFFFF", fontSize: 20, fontWeight: "300", letterSpacing: 0.2 },
+  thingScreen: { flex: 1, paddingHorizontal: 32 },
+  thingCenter: { flex: 1, alignItems: "center", justifyContent: "center" },
+  minutesButton: { minHeight: 44, minWidth: 140, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, paddingVertical: 8, overflow: "hidden" },
+  minutesValue: { color: "#FFFFFF", fontSize: 22, fontWeight: "300", letterSpacing: 0.2, textAlign: "center", includeFontPadding: false },
+  startSpacer: { height: 36 },
   micButton: { width: 120, height: 120, borderRadius: 60, borderWidth: 2, borderColor: "#22C55E", alignItems: "center", justifyContent: "center" },
   micPulse: { position: "absolute", width: 116, height: 116, borderRadius: 58, backgroundColor: "#22C55E" },
   pressed: { opacity: 0.58 },
@@ -444,8 +474,8 @@ const styles = StyleSheet.create({
   reason: { color: "#6B7280", fontSize: 14, lineHeight: 20, fontWeight: "300", textAlign: "center", marginTop: 26, maxWidth: 280 },
   startAnchor: { position: "absolute", left: 0, right: 0, alignItems: "center" },
   textButton: { minHeight: 44, minWidth: 80, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 },
-  startText: { color: "#FFFFFF", fontSize: 16, fontWeight: "300" },
-  notThisOneButton: { minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 2 },
+  startText: { color: "#22C55E", fontSize: 16, fontWeight: "600", letterSpacing: 0.4 },
+  notThisOneButton: { minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 8 },
   notThisOneText: { color: "#6B7280", fontSize: 13, fontWeight: "300" },
   sessionScreen: { flex: 1, backgroundColor: "#000000", paddingHorizontal: 32 },
   sessionTask: { color: "#6B7280", fontSize: 14, fontWeight: "300", textAlign: "center", minHeight: 40 },
@@ -457,18 +487,19 @@ const styles = StyleSheet.create({
   captureInput: { width: "100%", minHeight: 48, color: "#FFFFFF", fontSize: 16, fontWeight: "300", textAlign: "center", paddingHorizontal: 4, paddingVertical: 10, borderWidth: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#6B7280" },
   endLink: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, marginTop: 18 },
   endText: { color: "#6B7280", fontSize: 13, fontWeight: "300" },
-  cardScreen: { flex: 1, backgroundColor: "#000000" },
-  cardContent: { alignItems: "center", width: "100%" },
-  shareCanvas: { width: 360, height: 640, maxWidth: "100%", backgroundColor: "#000000", paddingHorizontal: 32, paddingVertical: 34 },
-  cardStats: { flex: 1, alignItems: "center", justifyContent: "center" },
-  cardTask: { color: "#6B7280", fontSize: 14, fontWeight: "300", textAlign: "center", marginBottom: 22 },
-  cardNumber: { color: "#FFFFFF", fontSize: 48, lineHeight: 54, fontWeight: "300", letterSpacing: -1.8 },
-  savedNumber: { color: "#22C55E", fontSize: 56, lineHeight: 62, fontWeight: "300", letterSpacing: -2, marginTop: 22 },
-  cardLabel: { color: "#6B7280", fontSize: 12, fontWeight: "300", marginTop: 3, marginBottom: 8 },
-  groups: { paddingTop: 10 },
-  group: { marginTop: 10 },
-  groupTitle: { color: "#6B7280", fontSize: 11, fontWeight: "600", letterSpacing: 1.2, marginBottom: 5 },
-  groupItem: { color: "#FFFFFF", fontSize: 13, lineHeight: 19, fontWeight: "300" },
-  wordmark: { color: "#FFFFFF", fontSize: 12, fontWeight: "600", textAlign: "center", letterSpacing: 0.4 },
-  shareText: { color: "#FFFFFF", fontSize: 16, fontWeight: "300" },
+  cardScreen: { flex: 1, backgroundColor: "#000000", paddingHorizontal: 24 },
+  shareBody: { flex: 1, alignItems: "center", justifyContent: "flex-start", backgroundColor: "#000000", paddingTop: 8 },
+  cardTask: { color: "#6B7280", fontSize: 13, fontWeight: "300", textAlign: "center", marginBottom: 8, maxWidth: 300 },
+  statsBlock: { alignItems: "center", justifyContent: "center", marginTop: 4 },
+  cardNumber: { color: "#FFFFFF", fontSize: 40, lineHeight: 46, fontWeight: "300", letterSpacing: -1.6, textAlign: "center" },
+  savedNumber: { color: "#22C55E", fontSize: 52, lineHeight: 58, fontWeight: "300", letterSpacing: -2, textAlign: "center", marginTop: 14 },
+  cardLabel: { color: "#6B7280", fontSize: 11, fontWeight: "300", marginTop: 2, marginBottom: 6, textAlign: "center", letterSpacing: 0.4 },
+  researchNote: { color: "#6B7280", fontSize: 10, fontWeight: "300", marginTop: 6, textAlign: "center", letterSpacing: 0.3, opacity: 0.7 },
+  listBlock: { alignSelf: "stretch", alignItems: "flex-start", marginTop: 20, paddingHorizontal: 8 },
+  listItem: { color: "#FFFFFF", fontSize: 13, lineHeight: 20, fontWeight: "300", marginTop: 4 },
+  listLabel: { color: "#6B7280", fontSize: 10, fontWeight: "600", letterSpacing: 1 },
+  moreItems: { color: "#6B7280", fontSize: 11, fontWeight: "300", marginTop: 8, letterSpacing: 0.2 },
+  wordmark: { color: "#6B7280", fontSize: 11, fontWeight: "300", textAlign: "center", letterSpacing: 1.4, marginTop: "auto", paddingTop: 20 },
+  shareButton: { alignSelf: "center", minHeight: 44, minWidth: 120, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, marginTop: 12 },
+  shareText: { color: "#22C55E", fontSize: 16, fontWeight: "600", letterSpacing: 0.4 },
 });

@@ -1,0 +1,44 @@
+{
+  "summary": "All 10 fixes in this iteration verified. FIX 1 (share button): shareCard at index.tsx:428-444 wraps flow in try/catch, calls captureRef with {format:'png', quality:1, result:'tmpfile'} (no forced dimensions), prefixes rawUri with 'file://' if not already prefixed (:432), then calls Sharing.shareAsync on native or navigator.share on web with a File - share-button testID present at :254 and pressable. FIX 2 (CardScreen layout): ScrollView is not imported (grep -c ScrollView => 0); render order inside shareBody is cardTask -> statsBlock (focused, captured, savedNumber + label, researchNote 'based on UC Irvine interruption research') -> listBlock -> wordmark 'Execute AI' -> share-button rendered OUTSIDE shareBody (:254); wordmark style has color '#6B7280' fontSize 11 marginTop:'auto' (:502); shareBody uses {flex:1, alignItems:'center', justifyContent:'flex-start'} with NO 'space-between' anywhere in the file. FIX 3 (time-saved math): savedMinutes = card.interruptions.length * 23 at :223 (deferred NOT added); savedText = '0m' when length===0, else formatDuration(savedMinutes*60) - so 7 => '2h 41m', 3 => '1h 9m', 0 => '0m'. FIX 4 (list cap): listItems = [...now (label NOW), ...later (label LATER)] at :225-228, visibleItems = listItems.slice(0,4), '+N more' rendered only when extra > 0 (:250); DROP intentionally excluded. FIX 5 (task font scale): taskText at :183 uses numberOfLines={3}, adjustsFontSizeToFit, minimumFontScale={0.55}. FIX 6 (ThingScreen spacing): minutes-selector and start-button both inside the same startAnchor Animated.View (:188-197) separated by <View style={styles.startSpacer} /> (height:36 at :468); startAnchor style position:'absolute' bottom = insets.bottom + 32 (:188). FIX 7 (minutes overlap): styles.minutesButton has minWidth:140 + overflow:'hidden' (:466); styles.minutesValue has textAlign:'center', includeFontPadding:false (:467); the Text uses key={`minutes-${minutes}`} at :190 forcing a remount on each change. FIX 8 (backend task cap): server.py:188 - deferred items produced via [limit_words(item, 6)[:60] ...]; alternatives inherit trimmed deferred at :192-195; verified with a verbose transcript in test_task_deferred_items_are_capped_to_six_words (every deferred/alternative <=6 words, <=60 chars). FIX 9 (backend sort trim): server.py:209 trims each input via limit_words(item,6)[:60] BEFORE sending to Gemini; buckets are rebuilt from trimmed inputs at :218-224 (union == trimmed inputs, no loss, no addition); verified with test_sort_trims_long_interruption_and_returns_six_word_bucket_item - a 14-word sentence returns in the union trimmed to its first 6 words and short items round-trip unchanged. REGRESSION: SpeakScreen still renders 'Speak your chaos' (:146) above and 'One thing at a time' (:151) below the mic - confirmed by browser smoke on the public URL at 390x844. Backend regression: 10/10 pytest cases pass on test_execute_ai_api.py (8 pre-existing + 2 new lock-in tests for the word caps), runtime 9.7s + 6.1s. No red screen, no console errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_execute_ai_api.py",
+    "/app/test_reports/pytest/pytest_results_iter6.xml",
+    "/app/test_reports/browser/iter6_speak.jpeg"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "shareCard is well-guarded: try/catch, no width/height forcing, tmpfile result, file:// prefixing, native path uses Sharing.shareAsync, web path uses navigator.share with a File. Sharing.isAvailableAsync() returns false on the web preview so the button becomes a no-op there - expected and correct.",
+    "CardScreen no longer uses ScrollView (import removed and grep returns 0), and shareBody drops 'space-between'. Layout is now flow-based with wordmark pushed to bottom via marginTop:'auto' - single-screen, no scroll.",
+    "savedMinutes math cleanly uses only interruptions.length * 23; savedText branch handles the 0 case explicitly so users don't see '0h 0m' when they had a clean session.",
+    "listItems concatenation preserves order (NOW first, then LATER), slices to 4 correctly, and DROP items are intentionally omitted from the shared card - matches the spec.",
+    "ThingScreen taskText adjustsFontSizeToFit with minimumFontScale 0.55 will let a 40pt title scale down to ~22pt before overflowing, which combined with numberOfLines={3} prevents the previous overflow into the CTA row.",
+    "Both minutes-selector and start-button sit inside one Animated.View pinned to bottom via insets.bottom + 32, separated by a fixed 36px spacer. Safe-area aware and stable across devices.",
+    "minutesValue remount key + overflow:'hidden' + fixed minWidth 140 + centered text prevent width jitter and text bleed when jumping between '15 min' and '120 min'.",
+    "Backend limit_words uses whitespace-split first six tokens, then char-caps at 60 - correct order (word cap first, then defensive char cap). server.py:209 trims BEFORE sending to Gemini, so the LLM prompt itself is bounded and the returned buckets are rebuilt from the trimmed set via a normalized-text match, guaranteeing no loss and no invented items."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_execute_ai_api.py",
+    "/app/test_reports/iteration_6.json",
+    "/app/test_reports/pytest/pytest_results_iter6.xml",
+    "/app/test_reports/browser/iter6_speak.jpeg"
+  ],
+  "success_rate": {
+    "backend": "100% (10/10 pytest, includes 2 new lock-in tests for task deferred cap and sort trimming)",
+    "frontend": "Speak screen verified live at 390x844 on the public URL. CardScreen/ThingScreen visual state cannot be exercised from a headless browser (no mic in web preview and no dev route to seed phase='card'), so those 6 fixes are verified by strict code inspection against the spec - all match exactly."
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Regression harness /app/backend/tests/test_execute_ai_api.py now contains 10 tests. The two new ones (test_task_deferred_items_are_capped_to_six_words, test_sort_trims_long_interruption_and_returns_six_word_bucket_item) will catch any future regression on the server-side word caps. To exercise CardScreen/ThingScreen/SessionScreen visually in the web preview, add a URL-param dev hook that seeds phase and a synthetic Task/SessionCard - without it, only code-level verification is possible for those screens.",
+  "rca_of_issue": "Not applicable - all 10 fixes verified via combined code inspection + backend integration tests + browser smoke."
+}
