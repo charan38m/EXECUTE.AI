@@ -36,6 +36,12 @@ Execute AI helps overwhelmed students, founders, and knowledge workers regain fo
 - End card now separates captured count from deferred count, computes time saved from both, always renders NOW/LATER/DROP headings, and keeps item text out of the shared 9:16 PNG.
 - Tightened Gemini sorting guidance and server-side preservation so every captured/deferred item is represented exactly once, defaulting unmatched items to LATER.
 
+## Refinements — 2026-09-05
+- Fixed missing StyleSheet entries introduced in the prior patch: added `styles.tagline`, `styles.minutesButton`, and `styles.minutesValue` so the Speak-screen "One thing at a time" line and the Task-screen minutes selector are visible.
+- `Group` component now returns null when its items array is empty, so unused NOW/LATER/DROP headings stop rendering on the card.
+- Lifted the selected minutes value into the `onStart` callback so the Session countdown honors the user's adjusted duration (was previously locked to Gemini's suggestion).
+- Rebalanced the share-canvas layout: `cardStats` uses `flex:1, justifyContent:'center'` and the canvas no longer uses `space-between`, closing the large empty strip between stats and the "Execute AI" wordmark while keeping the wordmark at the bottom of the 9:16 PNG.
+
 ## Prioritized backlog
 
 ### P0

@@ -1,0 +1,54 @@
+{
+  "summary": "Verify-only run: 8/8 backend pytest cases pass (transcribe 415/400/200, task 400/happy w/ word-limits, sort empty/union preservation). Speak screen verified in web preview at 390x844 - both copy lines render as grey #6B7280, 'Speak your chaos' above the mic and 'One thing at a time' below. CRITICAL FRONTEND BUG FOUND: the minutes-selector's local state in ThingScreen is NEVER propagated back to the parent Task, so startSession always uses task.minutes (the original value from Gemini) - user-selected minutes are ignored when starting the session.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ThingScreen minutes-selector -> Index.startSession",
+        "issue": "Tapping minutes-selector updates only the local `minutes` state inside ThingScreen. startSession reads task.minutes from parent Index state, so the user's chosen minutes value is discarded. Reference: /app/frontend/app/index.tsx:164 (local useState), :183 (adjustMinutes), :349 (`const seconds = task.minutes * 60`). Fix: lift minutes state to parent (or accept a `minutes` argument in onStart), then pass through to plannedSeconds and store back into task.",
+        "testID": "minutes-selector / start-button",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "CardScreen (shareCanvas)",
+        "issues": [
+          "shareCanvas is a fixed 360x640 with justifyContent: 'space-between'. cardStats occupies ~350px at top; wordmark is a single 12px line pinned to the bottom. The natural gap between the last stat label ('time saved') and the wordmark is still ~150-180px which may read as 'giant empty vertical whitespace' in the exported PNG. Consider justifyContent: 'flex-start' with an explicit smaller marginTop on wordmark (e.g., 32-48px) so the block feels tight, per the checklist item requesting 'no giant empty air gap'."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_execute_ai_api.py",
+    "/app/test_reports/pytest/pytest_results_iter4.xml",
+    "/app/test_reports/browser/iter4_speak.jpeg"
+  ],
+  "action_items": [
+    "Fix minutes propagation: lift minutes state out of ThingScreen (or pass to onStart) so startSession uses the user-selected value rather than task.minutes.",
+    "Revisit CardScreen shareCanvas gap: replace justifyContent:'space-between' with a tighter layout (e.g., flex-start + fixed marginTop on wordmark) so the exported PNG feels gap-closed rather than centered.",
+    "After fix, retest the mic->task->session->card flow end-to-end on a native build or with a mocked task to confirm both."
+  ],
+  "critical_code_review_comments": [
+    "Local vs lifted state anti-pattern in ThingScreen: user-visible UI state (chosen minutes) diverges from the source of truth (parent task.minutes), which drove the bug above.",
+    "shareCanvas hard-codes width/height 360x640 and space-between; this can produce inconsistent gaps depending on how many stat lines render."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_execute_ai_api.py",
+    "/app/test_reports/iteration_4.json"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8)",
+    "frontend": "Speak screen verified in browser. Task/Session/Card screens verified via code review only (audio recording cannot be driven from the web preview). One HIGH-priority frontend bug identified."
+  },
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend regression file is /app/backend/tests/test_execute_ai_api.py (loads /app/frontend/.env for EXPO_PUBLIC_BACKEND_URL). After the minutes-propagation fix and the wordmark-gap tweak land, retest by: (1) rerunning pytest, (2) confirming Speak copy lines still render, and (3) either running a native flow or, on web, exposing a test hook to jump to phase='thing' with a synthetic Task to verify minutes-selector -> startSession honors the selected value, and to inspect the exported PNG from CardScreen.",
+  "rca_of_issue": "ThingScreen owns a local `const [minutes, setMinutes] = useState(task.minutes)` and mutates it via adjustMinutes(). The Start button calls onStart which is startSession in the parent; startSession only reads parent state `task.minutes`. Nothing writes the local minutes back up (no setTask, no callback prop). Reproduction: user records, receives task with minutes=25, taps minutes-selector to cycle to 45 min, taps Start - session begins at 25 min. Mitigation: lift state or pass minutes as an argument, e.g., onStart(minutes) -> setTask({...task, minutes}); startSession(). "
+}

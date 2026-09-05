@@ -27,7 +27,7 @@ import {
   type TextStyle,
   type TextInputSubmitEditingEvent,
 } from "react-native";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 import { storage } from "@/src/utils/storage";
@@ -38,6 +38,36 @@ type Task = { task: string; minutes: number; deferred: string[]; reason: string;
 type Sorted = { now: string[]; later: string[]; drop: string[] };
 type SessionCard = { task: string; durationSeconds: number; interruptions: string[]; deferredItems: string[]; sorted: Sorted };
 const webInputStyle = { outlineStyle: "none" } as unknown as TextStyle;
+const RECORDING_OPTIONS = { ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true };
+
+type RecorderControllerHandle = {
+  start: () => Promise<void>;
+  stopAndRelease: () => Promise<string | null>;
+};
+
+const RecorderController = forwardRef<RecorderControllerHandle, { onState: (isRecording: boolean, metering: number) => void }>(function RecorderController({ onState }, ref) {
+  const recorder = useAudioRecorder(RECORDING_OPTIONS);
+  const recorderState = useAudioRecorderState(recorder, 100);
+
+  useEffect(() => {
+    onState(recorderState.isRecording, recorderState.metering ?? 0);
+  }, [onState, recorderState.isRecording, recorderState.metering]);
+
+  useImperativeHandle(ref, () => ({
+    start: async () => {
+      await recorder.prepareToRecordAsync(RECORDING_OPTIONS);
+      recorder.record({ forDuration: 60 });
+    },
+    stopAndRelease: async () => {
+      if (recorder.isRecording) await recorder.stop();
+      const uri = recorder.uri;
+      recorder.release();
+      return uri;
+    },
+  }), [recorder]);
+
+  return null;
+});
 
 const BACKEND_URL = (
   Constants.expoConfig?.extra?.backendUrl ?? process.env.EXPO_PUBLIC_BACKEND_URL ?? ""
@@ -114,11 +144,12 @@ function SpeakScreen({ recording, amplitude, onPress, error }: { recording: bool
   const pulse = Math.min(0.35, Math.max(0, amplitude / 160));
   return (
     <View style={styles.centerScreen} testID="speak-screen">
-      <Text style={styles.prompt}>{error || (recording ? "Listening" : "What’s on your mind?")}</Text>
+      <Text style={styles.prompt}>{error || "Speak your chaos"}</Text>
       <Pressable testID="mic-button" accessibilityRole="button" accessibilityLabel={recording ? "Stop recording" : "Start recording"} onPress={onPress} style={({ pressed }) => [styles.micButton, pressed && styles.pressed]}>
         <View style={[styles.micPulse, { opacity: recording ? 0.25 + pulse : 0 }]} />
         <MaterialCommunityIcons name="microphone" size={30} color="#FFFFFF" />
       </Pressable>
+      <Text style={styles.tagline}>One thing at a time</Text>
     </View>
   );
 }
@@ -127,25 +158,38 @@ function ProcessingScreen() {
   return <View style={styles.centerScreen} testID="processing-screen"><QuietDot /></View>;
 }
 
-function ThingScreen({ task, onStart, onNotThisOne, insets }: { task: Task; onStart: () => void; onNotThisOne: () => void; insets: { bottom: number } }) {
+function ThingScreen({ task, onStart, onNotThisOne, insets }: { task: Task; onStart: (minutes: number) => void; onNotThisOne: () => void; insets: { bottom: number } }) {
   const fade = useRef(new Animated.Value(0)).current;
   const [ready, setReady] = useState(false);
+  const [minutes, setMinutes] = useState(task.minutes);
+  const minuteOptions = [15, 25, 45, 60, 90, 120];
   useEffect(() => {
+    setMinutes(task.minutes);
+    setReady(false);
+    fade.setValue(0);
     const timer = setTimeout(() => {
       setReady(true);
       Animated.timing(fade, { toValue: 1, duration: 250, easing: Easing.out(Easing.ease), useNativeDriver: true }).start();
     }, 2000);
     return () => clearTimeout(timer);
-  }, [fade]);
+  }, [fade, task.task, task.minutes]);
+  const adjustMinutes = () => {
+    const currentIndex = minuteOptions.indexOf(minutes);
+    const nextIndex = currentIndex === -1 ? minuteOptions.findIndex((value) => value > minutes) : currentIndex + 1;
+    setMinutes(minuteOptions[nextIndex >= 0 && nextIndex < minuteOptions.length ? nextIndex : 0]);
+  };
   return (
     <View style={styles.centerScreen} testID="thing-screen">
       <Text style={styles.taskText}>{task.task}</Text>
       <Text style={styles.reason}>{task.reason}</Text>
+      <Pressable testID="minutes-selector" accessibilityRole="button" accessibilityLabel="Adjust focus minutes" onPress={adjustMinutes} disabled={!ready} style={({ pressed }) => [styles.minutesButton, pressed && styles.pressed]}>
+        <Text style={styles.minutesValue}>{minutes} min</Text>
+      </Pressable>
       <Animated.View style={[styles.startAnchor, { bottom: insets.bottom + 24, opacity: fade }]}>
-        <Pressable testID="start-button" disabled={!ready} onPress={onStart} style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}>
+        <Pressable testID="start-button" disabled={!ready} onPress={() => onStart(minutes)} style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}>
           <Text style={styles.startText}>Start</Text>
         </Pressable>
-        {task.alternatives.length > 0 ? <Pressable testID="not-this-one" disabled={!ready} onPress={onNotThisOne} style={({ pressed }) => [styles.notThisOneButton, pressed && styles.pressed]}><Text style={styles.notThisOneText}>Not this one?</Text></Pressable> : null}
+        {task.alternatives.length > 0 ? <Pressable testID="not-this-one" disabled={!ready} onPress={onNotThisOne} style={({ pressed }) => [styles.notThisOneButton, pressed && styles.pressed]}><Text style={styles.notThisOneText}>Not this one</Text></Pressable> : null}
       </Animated.View>
     </View>
   );
@@ -172,6 +216,7 @@ function SessionScreen({ task, remaining, plannedSeconds, count, onSubmit, onEnd
 }
 
 function Group({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) return null;
   return <View style={styles.group}><Text style={styles.groupTitle}>{title}</Text>{items.map((item, index) => <Text key={`${item}-${index}`} style={styles.groupItem}>{item}</Text>)}</View>;
 }
 
@@ -210,12 +255,13 @@ export default function Index() {
   const [plannedSeconds, setPlannedSeconds] = useState(0);
   const [interruptions, setInterruptions] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
+  const [recorderKey, setRecorderKey] = useState(0);
   const sessionStartedAt = useRef(0);
   const endingSession = useRef(false);
   const stopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordingLifecycle = useRef<"idle" | "starting" | "recording" | "stopping">("idle");
+  const recorderController = useRef<RecorderControllerHandle | null>(null);
   const cardRef = useRef<View>(null);
-  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
-  const recorderState = useAudioRecorderState(recorder, 100);
 
   useEffect(() => {
     let active = true;
@@ -231,25 +277,23 @@ export default function Index() {
     return () => { active = false; };
   }, []);
 
-  useEffect(() => {
-    setRecording(recorderState.isRecording);
-    setAmplitude(recorderState.metering ?? 0);
-  }, [recorderState.isRecording, recorderState.metering]);
+  const handleRecorderState = useCallback((isRecording: boolean, metering: number) => {
+    setRecording(isRecording);
+    setAmplitude(metering);
+  }, []);
 
   const stopRecording = useCallback(async () => {
-    if (!recorder.isRecording) return;
-    await recorder.stop();
+    if (recordingLifecycle.current !== "recording") return;
+    recordingLifecycle.current = "stopping";
     if (stopTimer.current) clearTimeout(stopTimer.current);
-    const uri = recorder.uri;
     setRecording(false);
     setAmplitude(0);
-    if (!uri) {
-      setError("No recording found");
-      return;
-    }
-    setPhase("processing");
-    setError("");
     try {
+      const uri = await recorderController.current?.stopAndRelease();
+      setRecorderKey((value) => value + 1);
+      if (!uri) throw new Error("No recording found");
+      setPhase("processing");
+      setError("");
       const form = new FormData();
       if (Platform.OS === "web") {
         const blob = await (await fetch(uri)).blob();
@@ -264,27 +308,47 @@ export default function Index() {
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not understand that recording");
       setPhase("speak");
+    } finally {
+      recordingLifecycle.current = "idle";
     }
-  }, [recorder]);
+  }, []);
 
   const startRecording = useCallback(async () => {
+    if (recordingLifecycle.current !== "idle") return;
+    recordingLifecycle.current = "starting";
     setError("");
-    const permission = await requestRecordingPermissionsAsync();
-    if (!permission.granted) {
-      setError("Microphone permission is needed");
-      return;
+    try {
+      const permission = await requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        setError("Microphone permission is needed");
+        recordingLifecycle.current = "idle";
+        return;
+      }
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      if (!recorderController.current) throw new Error("Recorder is not ready");
+      await recorderController.current.start();
+      recordingLifecycle.current = "recording";
+      setRecording(true);
+      stopTimer.current = setTimeout(() => { void stopRecording(); }, 60000);
+    } catch (requestError) {
+      try {
+        await recorderController.current?.stopAndRelease();
+      } catch {
+        // The controller is remounted below even if native cleanup also failed.
+      }
+      setRecorderKey((value) => value + 1);
+      recordingLifecycle.current = "idle";
+      setRecording(false);
+      setAmplitude(0);
+      setError(requestError instanceof Error ? requestError.message : "Could not start recording");
     }
-    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-    await recorder.prepareToRecordAsync();
-    recorder.record({ forDuration: 60 });
-    stopTimer.current = setTimeout(() => { void stopRecording(); }, 60000);
-  }, [recorder, stopRecording]);
+  }, [stopRecording]);
 
   const handleMic = () => { if (recording) void stopRecording(); else void startRecording(); };
 
-  const startSession = () => {
+  const startSession = (minutes: number) => {
     if (!task) return;
-    const seconds = task.minutes * 60;
+    const seconds = minutes * 60;
     setPlannedSeconds(seconds);
     setRemaining(seconds);
     setInterruptions([]);
@@ -292,7 +356,7 @@ export default function Index() {
     endingSession.current = false;
     sessionStartedAt.current = Date.now();
     setPhase("session");
-    track("session_started", anonymousId, { task: task.task, planned_minutes: task.minutes });
+    track("session_started", anonymousId, { task: task.task, planned_minutes: minutes });
   };
 
   const chooseNextTask = () => {
@@ -357,13 +421,21 @@ export default function Index() {
   if (phase === "thing" && task) content = <ThingScreen task={task} onStart={startSession} onNotThisOne={chooseNextTask} insets={insets} />;
   if (phase === "session" && task) content = <SessionScreen task={task} remaining={remaining} plannedSeconds={plannedSeconds} count={interruptions.length} onSubmit={addInterruption} onEnd={() => void finishSession()} draft={draft} setDraft={setDraft} insets={insets} />;
   if (phase === "card" && card) content = <CardScreen card={card} insets={insets} cardRef={cardRef} onShare={() => void shareCard()} />;
-  return <View style={styles.root}>{content}</View>;
+  return (
+    <>
+      <RecorderController key={recorderKey} ref={recorderController} onState={handleRecorderState} />
+      <View style={styles.root}>{content}</View>
+    </>
+  );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000000" },
   centerScreen: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   prompt: { color: "#6B7280", fontSize: 14, fontWeight: "300", letterSpacing: 0.1, marginBottom: 42, textAlign: "center" },
+  tagline: { color: "#6B7280", fontSize: 13, fontWeight: "300", letterSpacing: 0.2, marginTop: 42, textAlign: "center" },
+  minutesButton: { minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, paddingVertical: 8, marginTop: 28 },
+  minutesValue: { color: "#FFFFFF", fontSize: 20, fontWeight: "300", letterSpacing: 0.2 },
   micButton: { width: 120, height: 120, borderRadius: 60, borderWidth: 2, borderColor: "#22C55E", alignItems: "center", justifyContent: "center" },
   micPulse: { position: "absolute", width: 116, height: 116, borderRadius: 58, backgroundColor: "#22C55E" },
   pressed: { opacity: 0.58 },
@@ -387,8 +459,8 @@ const styles = StyleSheet.create({
   endText: { color: "#6B7280", fontSize: 13, fontWeight: "300" },
   cardScreen: { flex: 1, backgroundColor: "#000000" },
   cardContent: { alignItems: "center", width: "100%" },
-  shareCanvas: { width: 360, height: 640, maxWidth: "100%", backgroundColor: "#000000", paddingHorizontal: 32, paddingVertical: 34, justifyContent: "space-between" },
-  cardStats: { alignItems: "center", paddingTop: 12 },
+  shareCanvas: { width: 360, height: 640, maxWidth: "100%", backgroundColor: "#000000", paddingHorizontal: 32, paddingVertical: 34 },
+  cardStats: { flex: 1, alignItems: "center", justifyContent: "center" },
   cardTask: { color: "#6B7280", fontSize: 14, fontWeight: "300", textAlign: "center", marginBottom: 22 },
   cardNumber: { color: "#FFFFFF", fontSize: 48, lineHeight: 54, fontWeight: "300", letterSpacing: -1.8 },
   savedNumber: { color: "#22C55E", fontSize: 56, lineHeight: 62, fontWeight: "300", letterSpacing: -2, marginTop: 22 },
