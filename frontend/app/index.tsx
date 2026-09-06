@@ -148,7 +148,7 @@ function SpeakScreen({ recording, amplitude, onPress, error }: { recording: bool
         <View style={[styles.micPulse, { opacity: recording ? 0.25 + pulse : 0 }]} />
         <MaterialCommunityIcons name="microphone" size={30} color="#FFFFFF" />
       </Pressable>
-      <Text style={styles.tagline}>One thing at a time</Text>
+      <Text style={styles.tagline}>Get one thing. Execute it.</Text>
       {error ? <Text style={styles.errorLine} testID="speak-error">{error}</Text> : null}
     </View>
   );
@@ -213,7 +213,7 @@ function SessionScreen({ task, remaining, plannedSeconds, count, onSubmit, onEnd
         {count > 0 ? <Text style={styles.deflected}>{count} saved for later</Text> : null}
       </View>
       <View style={[styles.sessionBottom, { paddingBottom: insets.bottom + 20 }]}>
-        <TextInput testID="interruption-input" value={draft} onChangeText={setDraft} onSubmitEditing={onSubmit} onBlur={Keyboard.dismiss} returnKeyType="done" placeholder="Something came up?" placeholderTextColor="#6B7280" style={[styles.captureInput, Platform.OS === "web" ? webInputStyle : null]} blurOnSubmit={false} />
+        <TextInput testID="interruption-input" value={draft} onChangeText={setDraft} onSubmitEditing={onSubmit} onBlur={Keyboard.dismiss} returnKeyType="done" placeholder="Something popped up? Drop it here" placeholderTextColor="#6B7280" style={[styles.captureInput, Platform.OS === "web" ? webInputStyle : null]} blurOnSubmit={false} />
         <Pressable testID="end-early" onPress={onEnd} style={({ pressed }) => [styles.endLink, pressed && styles.pressed]}><Text style={styles.endText}>End early</Text></Pressable>
       </View>
     </KeyboardAvoidingView>
