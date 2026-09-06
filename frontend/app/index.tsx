@@ -179,18 +179,17 @@ function ThingScreen({ task, onStart, onNotThisOne, insets }: { task: Task; onSt
     setMinutes(minuteOptions[nextIndex >= 0 && nextIndex < minuteOptions.length ? nextIndex : 0]);
   };
   return (
-    <View style={styles.thingScreen} testID="thing-screen">
-      <View style={styles.thingCenter}>
+    <View style={[styles.thingScreen, { paddingBottom: insets.bottom + 32 }]} testID="thing-screen">
+      <View style={styles.thingHeader}>
         <Text style={styles.taskText} numberOfLines={3} adjustsFontSizeToFit minimumFontScale={0.55} allowFontScaling>
           {task.task}
         </Text>
-        <Text style={styles.reason} numberOfLines={2}>{task.reason}</Text>
+        <Text style={styles.reason} numberOfLines={3}>{task.reason}</Text>
       </View>
-      <Animated.View style={[styles.startAnchor, { bottom: insets.bottom + 32, opacity: fade }]}>
+      <Animated.View style={[styles.thingFooter, { opacity: fade }]}>
         <Pressable testID="minutes-selector" accessibilityRole="button" accessibilityLabel="Adjust focus minutes" onPress={adjustMinutes} disabled={!ready} style={({ pressed }) => [styles.minutesButton, pressed && styles.pressed]}>
           <Text key={`minutes-${minutes}`} style={styles.minutesValue} numberOfLines={1}>{minutes} min</Text>
         </Pressable>
-        <View style={styles.startSpacer} />
         <Pressable testID="start-button" disabled={!ready} onPress={() => onStart(minutes)} style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}>
           <Text style={styles.startText}>Start</Text>
         </Pressable>
@@ -233,45 +232,45 @@ function CardScreen({ card, insets, cardRef, onShare, onNewSession }: { card: Se
   return (
     <View style={[styles.cardScreen, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 }]} testID="card-screen">
       <View ref={cardRef} collapsable={false} style={styles.shareBody}>
-        <Text style={styles.cardTask} numberOfLines={2}>{card.task}</Text>
-        <View style={styles.statsBlock}>
-          <Text style={styles.cardNumber}>{formatDuration(card.durationSeconds)}</Text>
-          <Text style={styles.cardLabel}>focused</Text>
-          <Text style={styles.cardNumber}>{card.interruptions.length}</Text>
-          <Text style={styles.cardLabel}>captured</Text>
-          <Text style={styles.savedNumber}>{savedText}</Text>
-          <Text style={styles.cardLabel}>time saved</Text>
-          <Text style={styles.researchNote}>23 min per interruption — UC Irvine</Text>
-        </View>
-        <View style={styles.listBlock}>
-          {visibleNow.length > 0 ? (
-            <View style={styles.groupBlock}>
-              <Text style={styles.listLabel}>NOW</Text>
-              {visibleNow.map((text, index) => (
-                <Text key={`now-${index}`} style={styles.listItem} numberOfLines={1}>{text}</Text>
-              ))}
-            </View>
-          ) : null}
-          {visibleLater.length > 0 ? (
-            <View style={styles.groupBlock}>
-              <Text style={styles.listLabel}>LATER</Text>
-              {visibleLater.map((text, index) => (
-                <Text key={`later-${index}`} style={styles.listItem} numberOfLines={1}>{text}</Text>
-              ))}
-            </View>
-          ) : null}
-          {extra > 0 ? <Text style={styles.moreItems}>+{extra} more</Text> : null}
+        <View style={styles.shareBodyTop}>
+          <Text style={styles.cardTask} numberOfLines={2}>{card.task}</Text>
+          <View style={styles.statsBlock}>
+            <Text style={styles.cardNumber}>{formatDuration(card.durationSeconds)}</Text>
+            <Text style={styles.cardLabel}>focused</Text>
+            <Text style={styles.cardNumber}>{card.interruptions.length}</Text>
+            <Text style={styles.cardLabel}>captured</Text>
+            <Text style={styles.savedNumber}>{savedText}</Text>
+            <Text style={styles.cardLabel}>time saved</Text>
+            <Text style={styles.researchNote}>23 min per interruption — UC Irvine</Text>
+          </View>
+          <View style={styles.listBlock}>
+            {visibleNow.length > 0 ? (
+              <View style={styles.groupBlock}>
+                <Text style={styles.listLabel}>NOW</Text>
+                {visibleNow.map((text, index) => (
+                  <Text key={`now-${index}`} style={styles.listItem}>{text}</Text>
+                ))}
+              </View>
+            ) : null}
+            {visibleLater.length > 0 ? (
+              <View style={styles.groupBlock}>
+                <Text style={styles.listLabel}>LATER</Text>
+                {visibleLater.map((text, index) => (
+                  <Text key={`later-${index}`} style={styles.listItem}>{text}</Text>
+                ))}
+              </View>
+            ) : null}
+            {extra > 0 ? <Text style={styles.moreItems}>+{extra} more</Text> : null}
+          </View>
         </View>
         <Text style={styles.wordmark}>Execute AI</Text>
       </View>
-      <View style={styles.cardActions}>
-        <Pressable testID="share-button" onPress={onShare} style={({ pressed }) => [styles.shareButton, pressed && styles.pressed]}>
-          <Text style={styles.shareText}>Share</Text>
-        </Pressable>
-        <Pressable testID="new-session-button" onPress={onNewSession} style={({ pressed }) => [styles.newSessionButton, pressed && styles.pressed]}>
-          <Text style={styles.newSessionText}>New session</Text>
-        </Pressable>
-      </View>
+      <Pressable testID="share-button" onPress={onShare} style={({ pressed }) => [styles.shareButton, pressed && styles.pressed]}>
+        <Text style={styles.shareText}>Share</Text>
+      </Pressable>
+      <Pressable testID="new-session-button" onPress={onNewSession} style={({ pressed }) => [styles.newSessionButton, pressed && styles.pressed]}>
+        <Text style={styles.newSessionText}>New session</Text>
+      </Pressable>
     </View>
   );
 }
@@ -493,20 +492,19 @@ const styles = StyleSheet.create({
   tagline: { color: "#6B7280", fontSize: 13, fontWeight: "300", letterSpacing: 0.2, marginTop: 42, textAlign: "center" },
   errorLine: { color: "#6B7280", fontSize: 12, fontWeight: "300", letterSpacing: 0.2, marginTop: 22, textAlign: "center", paddingHorizontal: 24 },
   thingScreen: { flex: 1, paddingHorizontal: 32 },
-  thingCenter: { flex: 1, alignItems: "center", justifyContent: "center" },
+  thingHeader: { flex: 1, alignItems: "center", justifyContent: "center" },
+  thingFooter: { alignItems: "center", paddingTop: 24 },
   minutesButton: { minHeight: 44, minWidth: 140, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, paddingVertical: 8, overflow: "hidden" },
   minutesValue: { color: "#FFFFFF", fontSize: 22, fontWeight: "300", letterSpacing: 0.2, textAlign: "center", includeFontPadding: false },
-  startSpacer: { height: 36 },
   micButton: { width: 120, height: 120, borderRadius: 60, borderWidth: 2, borderColor: "#22C55E", alignItems: "center", justifyContent: "center" },
   micPulse: { position: "absolute", width: 116, height: 116, borderRadius: 58, backgroundColor: "#22C55E" },
   pressed: { opacity: 0.58 },
   quietDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#6B7280" },
   taskText: { color: "#FFFFFF", fontSize: 40, lineHeight: 48, fontWeight: "600", letterSpacing: -1.2, textAlign: "center", maxWidth: 340 },
   reason: { color: "#6B7280", fontSize: 14, lineHeight: 20, fontWeight: "300", textAlign: "center", marginTop: 26, maxWidth: 280 },
-  startAnchor: { position: "absolute", left: 0, right: 0, alignItems: "center" },
-  textButton: { minHeight: 44, minWidth: 80, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 },
-  startText: { color: "#22C55E", fontSize: 16, fontWeight: "600", letterSpacing: 0.4 },
-  notThisOneButton: { minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 8 },
+  textButton: { minHeight: 44, minWidth: 80, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 28 },
+  startText: { color: "#22C55E", fontSize: 20, fontWeight: "600", letterSpacing: 0.4 },
+  notThisOneButton: { minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 16 },
   notThisOneText: { color: "#6B7280", fontSize: 13, fontWeight: "300" },
   sessionScreen: { flex: 1, backgroundColor: "#000000", paddingHorizontal: 32 },
   sessionTask: { color: "#6B7280", fontSize: 14, fontWeight: "300", textAlign: "center", minHeight: 40 },
@@ -518,8 +516,9 @@ const styles = StyleSheet.create({
   captureInput: { width: "100%", minHeight: 48, color: "#FFFFFF", fontSize: 16, fontWeight: "300", textAlign: "center", paddingHorizontal: 4, paddingVertical: 10, borderWidth: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#6B7280" },
   endLink: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, marginTop: 18 },
   endText: { color: "#6B7280", fontSize: 13, fontWeight: "300" },
-  cardScreen: { flex: 1, backgroundColor: "#000000", paddingHorizontal: 24 },
-  shareBody: { flex: 1, alignItems: "center", justifyContent: "flex-start", backgroundColor: "#000000", paddingTop: 8 },
+  cardScreen: { flex: 1, backgroundColor: "#000000", paddingHorizontal: 24, alignItems: "center" },
+  shareBody: { flex: 1, alignSelf: "stretch", alignItems: "center", justifyContent: "space-between", backgroundColor: "#000000", paddingTop: 8, paddingBottom: 4 },
+  shareBodyTop: { alignSelf: "stretch", alignItems: "center" },
   cardTask: { color: "#6B7280", fontSize: 13, fontWeight: "300", textAlign: "center", marginBottom: 8, maxWidth: 300 },
   statsBlock: { alignItems: "center", justifyContent: "center", marginTop: 4 },
   cardNumber: { color: "#FFFFFF", fontSize: 40, lineHeight: 46, fontWeight: "300", letterSpacing: -1.6, textAlign: "center" },
@@ -528,13 +527,12 @@ const styles = StyleSheet.create({
   researchNote: { color: "#6B7280", fontSize: 10, fontWeight: "300", marginTop: 6, textAlign: "center", letterSpacing: 0.3, opacity: 0.7 },
   listBlock: { alignSelf: "stretch", alignItems: "flex-start", marginTop: 20, paddingHorizontal: 8 },
   groupBlock: { alignSelf: "stretch", marginTop: 10 },
-  listItem: { color: "#FFFFFF", fontSize: 13, lineHeight: 20, fontWeight: "300", marginTop: 2 },
+  listItem: { color: "#FFFFFF", fontSize: 13, lineHeight: 20, fontWeight: "300", marginTop: 2, flexShrink: 1 },
   listLabel: { color: "#6B7280", fontSize: 10, fontWeight: "600", letterSpacing: 1.4, marginBottom: 4 },
   moreItems: { color: "#6B7280", fontSize: 11, fontWeight: "300", marginTop: 10, letterSpacing: 0.2 },
-  wordmark: { color: "#6B7280", fontSize: 11, fontWeight: "300", textAlign: "center", letterSpacing: 1.4, marginTop: "auto", paddingTop: 20 },
-  cardActions: { alignSelf: "stretch", alignItems: "center", marginTop: 6 },
-  shareButton: { alignSelf: "center", minHeight: 44, minWidth: 120, alignItems: "center", justifyContent: "center", paddingHorizontal: 20 },
-  shareText: { color: "#22C55E", fontSize: 16, fontWeight: "600", letterSpacing: 0.4 },
-  newSessionButton: { alignSelf: "center", minHeight: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 4 },
-  newSessionText: { color: "#6B7280", fontSize: 12, fontWeight: "300", letterSpacing: 0.3 },
+  wordmark: { color: "#6B7280", fontSize: 11, fontWeight: "300", textAlign: "center", letterSpacing: 1.4 },
+  shareButton: { alignSelf: "center", minHeight: 44, minWidth: 120, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, marginTop: 24 },
+  shareText: { color: "#22C55E", fontSize: 18, fontWeight: "600", letterSpacing: 0.4 },
+  newSessionButton: { alignSelf: "center", minHeight: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 12 },
+  newSessionText: { color: "#6B7280", fontSize: 13, fontWeight: "300", letterSpacing: 0.3 },
 });

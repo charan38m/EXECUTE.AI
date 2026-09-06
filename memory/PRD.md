@@ -57,6 +57,12 @@ Execute AI helps overwhelmed students, founders, and knowledge workers regain fo
 - Added `New session` link on the end card that clears card, task, interruptions, draft, error and returns to the mic screen — closes the "stale card / time saved carrying over" concern by making state reset explicit and testable.
 - Backend `is_clean_task()` guard drops any deferred / captured item that starts with a filler word (and, but, so, um, idk, the, etc.) or exceeds 6 words / 60 chars. Both `/api/ai/task` and `/api/ai/sort` now instruct Gemini to REWRITE items as clean action phrases rather than preserve raw transcript wording, then the server filters again before returning. Filler-only fragments like "and idk what to do but" are now dropped entirely.
 
+## Refinements — 2026-09-06 (layout batch)
+- Task screen no longer uses absolute positioning for its footer. `ThingScreen` is a two-child flex column — a centered `thingHeader` (task + reason) plus a natural-height `thingFooter` (minutes selector, Start button, optional "Not this one") — so the minutes value can never render on top of the reason text at any task length.
+- End card now stacks linearly with explicit spacing: `shareBody` (flex:1, space-between) holds task, stats, list and the wordmark; the Share button lives outside `shareBody` with `marginTop:24`, and "New session" sits below Share with `marginTop:12`. Share can no longer overlap the captured list, and "New session" is separated from the wordmark by the entire Share button plus real margins.
+- Captured list items dropped `numberOfLines={1}` and gained `flexShrink:1` so they never truncate with ellipsis — combined with the server-side 6-word cap, items reliably fit one line and wrap only in edge cases.
+- Copy tweaks confirmed live: mic screen shows "Speak your chaos" above and "Get one thing. Execute it." below; session capture placeholder reads "Something popped up? Drop it here".
+
 ## Prioritized backlog
 
 ### P0
