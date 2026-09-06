@@ -143,12 +143,13 @@ function SpeakScreen({ recording, amplitude, onPress, error }: { recording: bool
   const pulse = Math.min(0.35, Math.max(0, amplitude / 160));
   return (
     <View style={styles.centerScreen} testID="speak-screen">
-      <Text style={styles.prompt}>{error || "Speak your chaos"}</Text>
+      <Text style={styles.prompt}>Speak your chaos</Text>
       <Pressable testID="mic-button" accessibilityRole="button" accessibilityLabel={recording ? "Stop recording" : "Start recording"} onPress={onPress} style={({ pressed }) => [styles.micButton, pressed && styles.pressed]}>
         <View style={[styles.micPulse, { opacity: recording ? 0.25 + pulse : 0 }]} />
         <MaterialCommunityIcons name="microphone" size={30} color="#FFFFFF" />
       </Pressable>
       <Text style={styles.tagline}>One thing at a time</Text>
+      {error ? <Text style={styles.errorLine} testID="speak-error">{error}</Text> : null}
     </View>
   );
 }
@@ -219,15 +220,16 @@ function SessionScreen({ task, remaining, plannedSeconds, count, onSubmit, onEnd
   );
 }
 
-function CardScreen({ card, insets, cardRef, onShare }: { card: SessionCard; insets: { top: number; bottom: number }; cardRef: RefObject<View | null>; onShare: () => void }) {
+function CardScreen({ card, insets, cardRef, onShare, onNewSession }: { card: SessionCard; insets: { top: number; bottom: number }; cardRef: RefObject<View | null>; onShare: () => void; onNewSession: () => void }) {
   const savedMinutes = card.interruptions.length * 23;
   const savedText = savedMinutes === 0 ? "0m" : formatDuration(savedMinutes * 60);
-  const listItems: { label: string; text: string }[] = [
-    ...card.sorted.now.map((text) => ({ label: "NOW", text })),
-    ...card.sorted.later.map((text) => ({ label: "LATER", text })),
-  ];
-  const visibleItems = listItems.slice(0, 4);
-  const extra = listItems.length - visibleItems.length;
+  const allItems = [...card.sorted.now, ...card.sorted.later, ...card.sorted.drop];
+  const totalCount = allItems.length;
+  const budget = 4;
+  const visibleNow = card.sorted.now.slice(0, budget);
+  const remainingBudget = budget - visibleNow.length;
+  const visibleLater = card.sorted.later.slice(0, Math.max(0, remainingBudget));
+  const extra = totalCount - visibleNow.length - visibleLater.length;
   return (
     <View style={[styles.cardScreen, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 }]} testID="card-screen">
       <View ref={cardRef} collapsable={false} style={styles.shareBody}>
@@ -239,21 +241,37 @@ function CardScreen({ card, insets, cardRef, onShare }: { card: SessionCard; ins
           <Text style={styles.cardLabel}>captured</Text>
           <Text style={styles.savedNumber}>{savedText}</Text>
           <Text style={styles.cardLabel}>time saved</Text>
-          <Text style={styles.researchNote}>based on UC Irvine interruption research</Text>
+          <Text style={styles.researchNote}>23 min per interruption — UC Irvine</Text>
         </View>
         <View style={styles.listBlock}>
-          {visibleItems.map((item, index) => (
-            <Text key={`${item.label}-${index}`} style={styles.listItem} numberOfLines={1}>
-              <Text style={styles.listLabel}>{item.label}  </Text>{item.text}
-            </Text>
-          ))}
+          {visibleNow.length > 0 ? (
+            <View style={styles.groupBlock}>
+              <Text style={styles.listLabel}>NOW</Text>
+              {visibleNow.map((text, index) => (
+                <Text key={`now-${index}`} style={styles.listItem} numberOfLines={1}>{text}</Text>
+              ))}
+            </View>
+          ) : null}
+          {visibleLater.length > 0 ? (
+            <View style={styles.groupBlock}>
+              <Text style={styles.listLabel}>LATER</Text>
+              {visibleLater.map((text, index) => (
+                <Text key={`later-${index}`} style={styles.listItem} numberOfLines={1}>{text}</Text>
+              ))}
+            </View>
+          ) : null}
           {extra > 0 ? <Text style={styles.moreItems}>+{extra} more</Text> : null}
         </View>
         <Text style={styles.wordmark}>Execute AI</Text>
       </View>
-      <Pressable testID="share-button" onPress={onShare} style={({ pressed }) => [styles.shareButton, pressed && styles.pressed]}>
-        <Text style={styles.shareText}>Share</Text>
-      </Pressable>
+      <View style={styles.cardActions}>
+        <Pressable testID="share-button" onPress={onShare} style={({ pressed }) => [styles.shareButton, pressed && styles.pressed]}>
+          <Text style={styles.shareText}>Share</Text>
+        </Pressable>
+        <Pressable testID="new-session-button" onPress={onNewSession} style={({ pressed }) => [styles.newSessionButton, pressed && styles.pressed]}>
+          <Text style={styles.newSessionText}>New session</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -443,11 +461,23 @@ export default function Index() {
     }
   };
 
+  const resetToSpeak = useCallback(() => {
+    setPhase("speak");
+    setCard(null);
+    setTask(null);
+    setInterruptions([]);
+    setDraft("");
+    setPlannedSeconds(0);
+    setRemaining(0);
+    setError("");
+    endingSession.current = false;
+  }, []);
+
   let content = <ProcessingScreen />;
   if (phase === "speak") content = <SpeakScreen recording={recording} amplitude={amplitude} onPress={handleMic} error={error} />;
   if (phase === "thing" && task) content = <ThingScreen task={task} onStart={startSession} onNotThisOne={chooseNextTask} insets={insets} />;
   if (phase === "session" && task) content = <SessionScreen task={task} remaining={remaining} plannedSeconds={plannedSeconds} count={interruptions.length} onSubmit={addInterruption} onEnd={() => void finishSession()} draft={draft} setDraft={setDraft} insets={insets} />;
-  if (phase === "card" && card) content = <CardScreen card={card} insets={insets} cardRef={cardRef} onShare={() => void shareCard()} />;
+  if (phase === "card" && card) content = <CardScreen card={card} insets={insets} cardRef={cardRef} onShare={() => void shareCard()} onNewSession={resetToSpeak} />;
   return (
     <>
       <RecorderController key={recorderKey} ref={recorderController} onState={handleRecorderState} />
@@ -461,6 +491,7 @@ const styles = StyleSheet.create({
   centerScreen: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   prompt: { color: "#6B7280", fontSize: 14, fontWeight: "300", letterSpacing: 0.1, marginBottom: 42, textAlign: "center" },
   tagline: { color: "#6B7280", fontSize: 13, fontWeight: "300", letterSpacing: 0.2, marginTop: 42, textAlign: "center" },
+  errorLine: { color: "#6B7280", fontSize: 12, fontWeight: "300", letterSpacing: 0.2, marginTop: 22, textAlign: "center", paddingHorizontal: 24 },
   thingScreen: { flex: 1, paddingHorizontal: 32 },
   thingCenter: { flex: 1, alignItems: "center", justifyContent: "center" },
   minutesButton: { minHeight: 44, minWidth: 140, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, paddingVertical: 8, overflow: "hidden" },
@@ -496,10 +527,14 @@ const styles = StyleSheet.create({
   cardLabel: { color: "#6B7280", fontSize: 11, fontWeight: "300", marginTop: 2, marginBottom: 6, textAlign: "center", letterSpacing: 0.4 },
   researchNote: { color: "#6B7280", fontSize: 10, fontWeight: "300", marginTop: 6, textAlign: "center", letterSpacing: 0.3, opacity: 0.7 },
   listBlock: { alignSelf: "stretch", alignItems: "flex-start", marginTop: 20, paddingHorizontal: 8 },
-  listItem: { color: "#FFFFFF", fontSize: 13, lineHeight: 20, fontWeight: "300", marginTop: 4 },
-  listLabel: { color: "#6B7280", fontSize: 10, fontWeight: "600", letterSpacing: 1 },
-  moreItems: { color: "#6B7280", fontSize: 11, fontWeight: "300", marginTop: 8, letterSpacing: 0.2 },
+  groupBlock: { alignSelf: "stretch", marginTop: 10 },
+  listItem: { color: "#FFFFFF", fontSize: 13, lineHeight: 20, fontWeight: "300", marginTop: 2 },
+  listLabel: { color: "#6B7280", fontSize: 10, fontWeight: "600", letterSpacing: 1.4, marginBottom: 4 },
+  moreItems: { color: "#6B7280", fontSize: 11, fontWeight: "300", marginTop: 10, letterSpacing: 0.2 },
   wordmark: { color: "#6B7280", fontSize: 11, fontWeight: "300", textAlign: "center", letterSpacing: 1.4, marginTop: "auto", paddingTop: 20 },
-  shareButton: { alignSelf: "center", minHeight: 44, minWidth: 120, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, marginTop: 12 },
+  cardActions: { alignSelf: "stretch", alignItems: "center", marginTop: 6 },
+  shareButton: { alignSelf: "center", minHeight: 44, minWidth: 120, alignItems: "center", justifyContent: "center", paddingHorizontal: 20 },
   shareText: { color: "#22C55E", fontSize: 16, fontWeight: "600", letterSpacing: 0.4 },
+  newSessionButton: { alignSelf: "center", minHeight: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 4 },
+  newSessionText: { color: "#6B7280", fontSize: 12, fontWeight: "300", letterSpacing: 0.3 },
 });

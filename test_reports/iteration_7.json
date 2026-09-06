@@ -1,0 +1,41 @@
+{
+  "summary": "Verified all 8 bug fixes for iteration 7. Backend: 11/11 pytest tests pass against live URL (3 initial 502s were transient Cloudflare/Gemini rate limiting, all passed on serial retry). Verified /api/ai/task and /api/ai/sort now enforce is_clean_task server-side (<=6 words, <=60 chars, no filler prefix). Frontend: code review confirms SpeakScreen always renders 'Speak your chaos' above mic with errors rendered separately as testID='speak-error'; CardScreen groups NOW/LATER blocks (visibleNow.slice(0,4), remainingBudget, visibleLater), drops counted in +N more, research note reads exactly '23 min per interruption \u2014 UC Irvine'; resetToSpeak clears card/task/interruptions/draft/plannedSeconds/remaining/error and wired to <Pressable testID='new-session-button'>'New session'; finishSession builds fresh nextCard with current interruptions; startSession clears interruptions. Live smoke on public URL confirmed 'Speak your chaos' visible on first load and no speak-error element rendered without an error.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/ai/*", "issue": "Cloudflare 502 Bad Gateway occurs intermittently when 2+ Gemini requests run in parallel via pytest-xdist. Individual retries pass. Consider rate-limit-friendly retries or lower xdist concurrency in CI."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_execute_ai_api.py",
+    "/app/test_reports/pytest/pytest_results_iter7.xml",
+    "/app/test_reports/browser/iter7_speak.jpeg"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:135 FILLER_PREFIXES set now includes all required tokens (and, but, so, or, um, uh, like, idk, i, the, a, an, plus extras). is_clean_task enforces <=6 words AND <=60 chars AND non-filler first word.",
+    "server.py:211 deferred items dropped entirely (not truncated) when they fail is_clean_task \u2014 matches spec.",
+    "server.py:243-246 sort endpoint post-filters every bucket item through is_clean_task \u2014 server is source of truth as noted.",
+    "index.tsx:146 'Speak your chaos' rendered unconditionally; error is a separate testID='speak-error' Text on line 152 \u2014 no ternary against error above mic.",
+    "index.tsx:226-232 listItems array removed; visibleNow=now.slice(0,4), remainingBudget computed, visibleLater filled from budget, extra counts drops (allItems includes card.sorted.drop).",
+    "index.tsx:244 research note string matches spec exactly.",
+    "index.tsx:464-474 resetToSpeak clears every required piece of state (phase, card, task, interruptions, draft, plannedSeconds, remaining, error, endingSession ref).",
+    "index.tsx:271 <Pressable testID='new-session-button'> with visible 'New session' text wired to resetToSpeak.",
+    "index.tsx:388,418,468 interruptions cleared on startSession and resetToSpeak; finishSession builds fresh nextCard each call using the current interruptions closure \u2014 no stale card leakage."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_execute_ai_api.py (updated: replaced old truncation-shape assertions with is_clean_task contract assertions; added test_task_deferred_items_pass_is_clean_task and test_sort_returns_only_clean_items covering the new spec)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All 8 bug fixes verified. Backend pytest suite at /app/backend/tests/test_execute_ai_api.py now asserts the is_clean_task contract for both /api/ai/task deferred items and /api/ai/sort bucket items. If tests fail with 502, retry sequentially \u2014 Gemini via Cloudflare occasionally rate-limits under parallel load. Web preview cannot exercise the microphone so Speak\u2192Thing\u2192Session\u2192Card flow is validated via backend + source inspection only.",
+  "rca_of_issue": "N/A \u2014 verification pass only, no bugs found."
+}

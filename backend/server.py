@@ -132,8 +132,22 @@ def limit_words(value: Any, limit: int) -> str:
     return " ".join(str(value).strip().split()[:limit])
 
 
-def normalized_text(value: str) -> str:
-    return " ".join(value.lower().split())
+FILLER_PREFIXES = {"and", "but", "so", "or", "um", "uh", "like", "idk", "i", "then", "well", "you", "just", "actually", "basically", "the", "a", "an", "of", "to", "in", "for"}
+
+
+def is_clean_task(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    words = stripped.split()
+    if len(words) > 6:
+        return False
+    if len(stripped) > 60:
+        return False
+    first = words[0].lower().strip(",.?!")
+    if first in FILLER_PREFIXES:
+        return False
+    return True
 
 # Add your routes to the router instead of directly to app
 @api_router.get("/")
@@ -177,15 +191,24 @@ async def choose_task(request: TaskRequest):
         raise HTTPException(status_code=400, detail="Transcript is required")
     system_message = """You receive a person's spoken, unstructured list of everything on their mind.
 Return ONLY valid JSON, no markdown, no preamble:
-{"task":"<single most important task, max 8 words, in the language the user spoke>","minutes":<realistic integer>,"deferred":["<other items, EACH one a short task phrase max 6 words, never a raw sentence>"],"reason":"<max 12 words on why this one first>"}
-Choose by: hard deadlines first, then highest consequence if missed, then what unblocks other work.
-Never return more than one task. Every deferred item must be a concise action phrase, not a copy of the transcript."""
+{"task":"<single most important task, max 8 words, in the language the user spoke>","minutes":<realistic integer>,"deferred":["<other items>"],"reason":"<max 12 words on why this one first>"}
+
+Rules for `deferred`:
+- Every item MUST be a CLEAN, REWRITTEN action phrase, max 6 words.
+- NEVER copy words from the transcript verbatim. NEVER start with filler words like "and", "but", "so", "idk", "um", "the".
+- Each item should read like a to-do written by a human (e.g. "Call dentist", "Send invoice to Priya", "Reply to Rahul's email").
+- If a chunk of transcript is filler, incomplete, or has no clear action, OMIT it entirely.
+- Return an empty deferred array rather than filler.
+
+Choose the primary task by: hard deadlines first, then highest consequence if missed, then what unblocks other work.
+Never return more than one task."""
     raw = await run_gemini(system_message, UserMessage(text=request.transcript))
     payload = parse_json_object(raw)
     try:
         task = limit_words(payload["task"], 8)[:100]
         minutes = max(1, min(int(payload["minutes"]), 480))
-        deferred = [limit_words(item, 6)[:60] for item in payload.get("deferred", []) if str(item).strip()]
+        deferred_raw = [str(item).strip() for item in payload.get("deferred", []) if str(item).strip()]
+        deferred = [item for item in deferred_raw if is_clean_task(item)]
         reason = limit_words(payload.get("reason", ""), 12)[:120]
         if not task:
             raise ValueError("missing task")
@@ -202,26 +225,25 @@ Never return more than one task. Every deferred item must be a concise action ph
 async def sort_interruptions(request: SortRequest):
     if not request.interruptions:
         return SortResponse(now=[], later=[], drop=[])
-    system_message = """Sort each item into NOW, LATER, or DROP. Default to LATER. Only use DROP if
-the item is clearly trivial and time-bound in a way that has already passed. Never drop anything
-that could be a real task or commitment. Return only JSON: {"now":[],"later":[],"drop":[]}.
-Preserve each item's original wording and include every input item exactly once."""
-    trimmed = [limit_words(item, 6)[:60] for item in request.interruptions]
-    prompt = json.dumps({"task": request.task, "interruptions": trimmed}, ensure_ascii=False)
+    system_message = """You receive a list of items a person captured while trying to focus.
+For each item:
+- REWRITE it as a CLEAN action phrase of max 6 words. Never copy raw transcript verbatim. Never start with filler like "and", "but", "so", "idk", "um".
+- If the item is filler, incomplete, or has no clear action, OMIT it entirely (do not put it in any bucket).
+Then sort each rewritten item into NOW, LATER, or DROP.
+- Default to LATER.
+- Use DROP only if the item is clearly trivial and time-bound in a way that has already passed.
+- Never drop a real task or commitment.
+
+Return ONLY JSON: {"now":[...],"later":[...],"drop":[...]}. Each array holds clean rewritten phrases (<=6 words), not the raw input."""
+    prompt = json.dumps({"task": request.task, "interruptions": request.interruptions}, ensure_ascii=False)
     payload = parse_json_object(await run_gemini(system_message, UserMessage(text=prompt)))
     try:
-        buckets = {
-            "now": [str(item).strip() for item in payload.get("now", []) if str(item).strip()],
-            "later": [str(item).strip() for item in payload.get("later", []) if str(item).strip()],
-            "drop": [str(item).strip() for item in payload.get("drop", []) if str(item).strip()],
-        }
         response: dict[str, List[str]] = {"now": [], "later": [], "drop": []}
-        for original in trimmed:
-            match = next(
-                (bucket for bucket, values in buckets.items() if normalized_text(original) in {normalized_text(value) for value in values}),
-                "later",
-            )
-            response[match].append(original)
+        for bucket in ("now", "later", "drop"):
+            for item in payload.get(bucket, []):
+                text = str(item).strip()
+                if is_clean_task(text):
+                    response[bucket].append(text)
         return SortResponse(**response)
     except (AttributeError, TypeError) as exc:
         raise HTTPException(status_code=502, detail="Gemini returned an unusable sort") from exc

@@ -50,6 +50,13 @@ Execute AI helps overwhelmed students, founders, and knowledge workers regain fo
 - Task screen: task title auto-scales (`adjustsFontSizeToFit`, `numberOfLines=3`, `minimumFontScale=0.55`) so long tasks fit; minutes selector and Start button live in the same bottom anchor with a 36px spacer; minutes value has fixed min-width, centered text, and re-mounts via `key` on change so "60 → 120" no longer overlaps.
 - Backend now caps every `deferred` item and every `interruptions` item at 6 words / 60 chars via `limit_words`, and the extraction prompt explicitly forbids raw transcript sentences in the deferred array. Sort endpoint uses the trimmed inputs so NOW/LATER items are always short.
 
+## Refinements — 2026-09-06 (list & cleanup batch)
+- End-card list now groups items under a single "NOW" / "LATER" heading instead of repeating the label on every line, capped at 4 total items across NOW+LATER with "+N more" including any DROP items in the count.
+- Research note under the time-saved number now reads exactly `23 min per interruption — UC Irvine`.
+- Speak screen always renders `Speak your chaos` above the mic; permission or transcription errors now render as a separate small line below the tagline instead of replacing the prompt.
+- Added `New session` link on the end card that clears card, task, interruptions, draft, error and returns to the mic screen — closes the "stale card / time saved carrying over" concern by making state reset explicit and testable.
+- Backend `is_clean_task()` guard drops any deferred / captured item that starts with a filler word (and, but, so, um, idk, the, etc.) or exceeds 6 words / 60 chars. Both `/api/ai/task` and `/api/ai/sort` now instruct Gemini to REWRITE items as clean action phrases rather than preserve raw transcript wording, then the server filters again before returning. Filler-only fragments like "and idk what to do but" are now dropped entirely.
+
 ## Prioritized backlog
 
 ### P0
