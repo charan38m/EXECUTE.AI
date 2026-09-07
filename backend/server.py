@@ -11,16 +11,10 @@ import uuid
 from datetime import datetime, timezone
 import json
 import re
-import tempfile
 import asyncio
 
-from emergentintegrations.llm.chat import (
-    FileContentWithMimeType,
-    LlmChat,
-    StreamDone,
-    TextDelta,
-    UserMessage,
-)
+from google import genai
+from google.genai import types
 
 
 ROOT_DIR = Path(__file__).parent
@@ -82,31 +76,33 @@ class SortResponse(BaseModel):
     drop: List[str]
 
 
-async def run_gemini(system_message: str, user_message: UserMessage) -> str:
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
-    if not api_key:
-        raise HTTPException(status_code=503, detail="Gemini is not configured")
+_genai_client: genai.Client | None = None
 
-    chat = (
-        LlmChat(
-            api_key=api_key,
-            session_id=str(uuid.uuid4()),
-            system_message=system_message,
-        )
-        .with_model("gemini", "gemini-3-flash-preview")
-        .with_params(temperature=0.1)
-    )
+
+def get_genai_client() -> genai.Client:
+    global _genai_client
+    if _genai_client is None:
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise HTTPException(status_code=503, detail="Gemini is not configured")
+        _genai_client = genai.Client(api_key=api_key)
+    return _genai_client
+
+
+async def run_gemini(system_message: str, contents: List[Any]) -> str:
+    client = get_genai_client()
+    config = types.GenerateContentConfig(system_instruction=system_message, temperature=0.1)
     async with gemini_lock:
         last_error: Exception | None = None
         for attempt in range(3):
-            chunks: List[str] = []
             try:
-                async for event in chat.stream_message(user_message):
-                    if isinstance(event, TextDelta):
-                        chunks.append(event.content)
-                    elif isinstance(event, StreamDone):
-                        break
-                return "".join(chunks).strip()
+                response = await asyncio.to_thread(
+                    client.models.generate_content,
+                    model="gemini-flash-latest",
+                    contents=contents,
+                    config=config,
+                )
+                return (response.text or "").strip()
             except Exception as exc:
                 last_error = exc
                 logger.warning("Gemini attempt %s failed: %s", attempt + 1, exc)
@@ -194,29 +190,17 @@ async def transcribe_audio(audio: UploadFile = File(...)):
     if not audio.content_type or not audio.content_type.startswith("audio/"):
         raise HTTPException(status_code=415, detail="An audio recording is required")
 
-    suffix = Path(audio.filename or "recording.m4a").suffix or ".m4a"
-    temporary_path = None
-    try:
-        contents = await audio.read()
-        if not contents:
-            raise HTTPException(status_code=400, detail="The recording is empty")
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temporary_file:
-            temporary_file.write(contents)
-            temporary_path = temporary_file.name
-        file_content = FileContentWithMimeType(audio.content_type, temporary_path)
-        result = await run_gemini(
-            """Transcribe the attached audio exactly as spoken. Detect English, Hindi, Telugu,
+    contents = await audio.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="The recording is empty")
+    audio_part = types.Part.from_bytes(data=contents, mime_type=audio.content_type)
+    result = await run_gemini(
+        """Transcribe the attached audio exactly as spoken. Detect English, Hindi, Telugu,
 or code-mixed speech automatically. Preserve the user's language and wording. Return only
 the transcript text, with no labels, explanation, or markdown.""",
-            UserMessage(text="Transcribe this voice note.", file_contents=[file_content]),
-        )
-        return TranscriptResponse(transcript=result)
-    finally:
-        if temporary_path:
-            try:
-                Path(temporary_path).unlink(missing_ok=True)
-            except OSError:
-                logger.warning("Could not remove temporary audio file")
+        ["Transcribe this voice note.", audio_part],
+    )
+    return TranscriptResponse(transcript=result)
 
 
 @api_router.post("/ai/task", response_model=TaskResponse)
@@ -237,7 +221,7 @@ Rules for `deferred`:
 Choose the primary task by: hard deadlines first, then highest consequence if missed, then what unblocks other work.
 Never return more than one task."""
     try:
-        raw = await run_gemini(system_message, UserMessage(text=request.transcript))
+        raw = await run_gemini(system_message, [request.transcript])
         payload = parse_json_object(raw)
         task = limit_words(payload["task"], 8)[:100]
         minutes = max(1, min(int(payload["minutes"]), 480))
@@ -275,7 +259,7 @@ Then sort each rewritten item into NOW, LATER, or DROP.
 
 Return ONLY JSON: {"now":[...],"later":[...],"drop":[...]}. Each array holds clean rewritten phrases (<=6 words), not the raw input."""
     prompt = json.dumps({"task": request.task, "interruptions": request.interruptions}, ensure_ascii=False)
-    payload = parse_json_object(await run_gemini(system_message, UserMessage(text=prompt)))
+    payload = parse_json_object(await run_gemini(system_message, [prompt]))
     try:
         response: dict[str, List[str]] = {"now": [], "later": [], "drop": []}
         for bucket in ("now", "later", "drop"):
