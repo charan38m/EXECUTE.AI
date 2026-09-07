@@ -10,6 +10,7 @@ from typing import Any, List
 import uuid
 from datetime import datetime, timezone
 import json
+import re
 import tempfile
 import asyncio
 
@@ -108,8 +109,9 @@ async def run_gemini(system_message: str, user_message: UserMessage) -> str:
                 return "".join(chunks).strip()
             except Exception as exc:
                 last_error = exc
+                logger.warning("Gemini attempt %s failed: %s", attempt + 1, exc)
                 if attempt < 2:
-                    await asyncio.sleep(1.5 * (attempt + 1))
+                    await asyncio.sleep(0.5 * (attempt + 1))
         logger.exception("Gemini request failed after retries")
         raise HTTPException(status_code=503, detail="Gemini is temporarily busy; please try again") from last_error
 
@@ -148,6 +150,38 @@ def is_clean_task(text: str) -> bool:
     if first in FILLER_PREFIXES:
         return False
     return True
+
+
+TIME_HINT = re.compile(
+    r"\b("
+    r"today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"morning|afternoon|evening|noon|midnight|deadline|due|before|by|until|"
+    r"asap|urgent|now|soon|next\s+week|next\s+month|"
+    r"\d{1,2}\s*(am|pm|:\d{2})|\d{1,2}\s*(o'clock|oclock)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+SPLIT_RE = re.compile(r"[.,;\n!?]|\b(?:and then|and also|and|also|then|plus|next)\b", re.IGNORECASE)
+
+
+def split_transcript(transcript: str) -> List[str]:
+    parts = SPLIT_RE.split(transcript)
+    return [chunk.strip(" -\t") for chunk in parts if chunk and chunk.strip(" -\t") and len(chunk.strip()) > 2]
+
+
+def local_task_from_transcript(transcript: str) -> "TaskResponse":
+    """Deterministic offline fallback when Gemini is unreachable after retries."""
+    stripped = transcript.strip()
+    items = split_transcript(stripped) or [stripped]
+    primary_source = next((item for item in items if TIME_HINT.search(item)), items[0])
+    primary = limit_words(primary_source, 8)[:100] or "Focus on top priority"
+    deferred_source = [item for item in items if item != primary_source]
+    deferred_trimmed = [limit_words(item, 6)[:60] for item in deferred_source]
+    deferred = [item for item in deferred_trimmed if is_clean_task(item)]
+    alternatives = [AlternativeTask(task=item, minutes=25, reason="Next up") for item in deferred]
+    reason = "Picked locally while AI is unreachable"
+    return TaskResponse(task=primary, minutes=25, deferred=deferred, reason=reason, alternatives=alternatives)
 
 # Add your routes to the router instead of directly to app
 @api_router.get("/")
@@ -202,9 +236,9 @@ Rules for `deferred`:
 
 Choose the primary task by: hard deadlines first, then highest consequence if missed, then what unblocks other work.
 Never return more than one task."""
-    raw = await run_gemini(system_message, UserMessage(text=request.transcript))
-    payload = parse_json_object(raw)
     try:
+        raw = await run_gemini(system_message, UserMessage(text=request.transcript))
+        payload = parse_json_object(raw)
         task = limit_words(payload["task"], 8)[:100]
         minutes = max(1, min(int(payload["minutes"]), 480))
         deferred_raw = [str(item).strip() for item in payload.get("deferred", []) if str(item).strip()]
@@ -217,8 +251,13 @@ Never return more than one task."""
             for item in deferred
         ]
         return TaskResponse(task=task, minutes=minutes, deferred=deferred, reason=reason, alternatives=alternatives)
-    except (KeyError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail="Gemini returned an unusable task") from exc
+    except (HTTPException, KeyError, TypeError, ValueError) as exc:
+        logger.warning("Gemini task selection failed after retries, using local fallback: %s", exc)
+        try:
+            return local_task_from_transcript(request.transcript)
+        except Exception as fallback_exc:
+            logger.exception("Local fallback also failed")
+            raise HTTPException(status_code=503, detail="Could not pick a task; please try again") from fallback_exc
 
 
 @api_router.post("/ai/sort", response_model=SortResponse)
