@@ -132,14 +132,16 @@ const formatTimer = (seconds: number) => {
 
 const CARD_TASK_BUDGET = 4;
 
+const safeNumber = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+
 const buildDailyCard = (history: HistoryEntry[]): DailyCard => {
   const today = history.filter((entry) => isSameDay(new Date(entry.completedAt), new Date()));
   const recent = today.slice(-CARD_TASK_BUDGET);
   return {
     taskLines: recent.map((entry) => entry.task),
     extraTaskCount: Math.max(0, today.length - recent.length),
-    totalSeconds: today.reduce((sum, entry) => sum + entry.durationSeconds, 0),
-    capturedCount: today.reduce((sum, entry) => sum + entry.capturedCount, 0),
+    totalSeconds: today.reduce((sum, entry) => sum + safeNumber(entry.durationSeconds), 0),
+    capturedCount: today.reduce((sum, entry) => sum + safeNumber(entry.capturedCount), 0),
   };
 };
 
@@ -319,22 +321,28 @@ function SessionScreen({ task, remaining, plannedSeconds, count, onSubmit, onEnd
   );
 }
 
+function ReceiptBody({ card, headerDate, focusedText }: { card: DailyCard; headerDate: string; focusedText: string }) {
+  return (
+    <>
+      <Text style={styles.cardHeader}>EXECUTED · {headerDate}</Text>
+      <View style={styles.taskList}>
+        {card.taskLines.map((text, index) => (
+          <Text key={`task-${index}`} style={styles.taskLine} numberOfLines={2}>✓ {text}</Text>
+        ))}
+        {card.extraTaskCount > 0 ? <Text style={styles.moreItems}>+{card.extraTaskCount} more</Text> : null}
+      </View>
+      <Text style={styles.statsLine}>{focusedText} focused · {card.capturedCount} things captured, 0 lost</Text>
+    </>
+  );
+}
+
 function CardScreen({ card, insets, cardRef, onShare, onNewSession }: { card: DailyCard; insets: { top: number; bottom: number }; cardRef: RefObject<View | null>; onShare: () => void; onNewSession: () => void }) {
   const headerDate = format(new Date(), "EEE d MMM");
   const focusedText = formatDuration(card.totalSeconds);
   return (
     <View style={[styles.cardScreen, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 }]} testID="card-screen">
-      <View ref={cardRef} collapsable={false} style={styles.shareBody}>
-        <View style={styles.shareBodyTop}>
-          <Text style={styles.cardHeader}>EXECUTED · {headerDate}</Text>
-          <View style={styles.taskList}>
-            {card.taskLines.map((text, index) => (
-              <Text key={`task-${index}`} style={styles.taskLine} numberOfLines={2}>✓ {text}</Text>
-            ))}
-            {card.extraTaskCount > 0 ? <Text style={styles.moreItems}>+{card.extraTaskCount} more</Text> : null}
-          </View>
-          <Text style={styles.statsLine}>{focusedText} focused · {card.capturedCount} things captured, 0 lost</Text>
-        </View>
+      <View style={styles.compactCard}>
+        <ReceiptBody card={card} headerDate={headerDate} focusedText={focusedText} />
         <Text style={styles.wordmark}>Execute AI</Text>
       </View>
       <Pressable testID="share-button" onPress={onShare} style={({ pressed }) => [styles.shareButton, pressed && styles.pressed]}>
@@ -343,6 +351,14 @@ function CardScreen({ card, insets, cardRef, onShare, onNewSession }: { card: Da
       <Pressable testID="new-session-button" onPress={onNewSession} style={({ pressed }) => [styles.newSessionButton, pressed && styles.pressed]}>
         <Text style={styles.newSessionText}>Start another</Text>
       </Pressable>
+      <View style={styles.exportWrap} pointerEvents="none">
+        <View ref={cardRef} collapsable={false} style={styles.exportCard}>
+          <View style={styles.exportContent}>
+            <ReceiptBody card={card} headerDate={headerDate} focusedText={focusedText} />
+          </View>
+          <Text style={styles.wordmark}>Execute AI</Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -615,15 +631,17 @@ const styles = StyleSheet.create({
   captureInput: { width: "100%", minHeight: 48, color: "#FFFFFF", fontSize: 16, fontWeight: "500", textAlign: "center", paddingHorizontal: 4, paddingVertical: 10, borderWidth: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#6B7280" },
   endLink: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, marginTop: 18 },
   endText: { color: "#9CA3AF", fontSize: 13, fontWeight: "500" },
-  cardScreen: { flex: 1, backgroundColor: "#000000", paddingHorizontal: 24, alignItems: "center" },
-  shareBody: { flex: 1, alignSelf: "stretch", alignItems: "center", justifyContent: "space-between", backgroundColor: "#000000", paddingTop: 8, paddingBottom: 4 },
-  shareBodyTop: { alignSelf: "stretch", alignItems: "center" },
+  cardScreen: { flex: 1, backgroundColor: "#000000", paddingHorizontal: 24, alignItems: "center", justifyContent: "center" },
+  compactCard: { alignSelf: "stretch", alignItems: "center" },
   cardHeader: { color: "#F5F5F5", fontSize: 15, fontWeight: "700", letterSpacing: 1, textAlign: "center" },
   taskList: { alignSelf: "stretch", alignItems: "flex-start", marginTop: 28, paddingHorizontal: 12 },
   taskLine: { color: "#FFFFFF", fontSize: 17, lineHeight: 24, fontWeight: "600", marginTop: 8 },
   statsLine: { color: "#D1D5DB", fontSize: 13, fontWeight: "500", letterSpacing: 0.2, textAlign: "center", marginTop: 28, paddingHorizontal: 12 },
   moreItems: { color: "#9CA3AF", fontSize: 13, fontWeight: "500", marginTop: 8, letterSpacing: 0.2 },
-  wordmark: { color: "#9CA3AF", fontSize: 11, fontWeight: "600", textAlign: "center", letterSpacing: 1.4 },
+  wordmark: { color: "#9CA3AF", fontSize: 11, fontWeight: "600", textAlign: "center", letterSpacing: 1.4, marginTop: 28 },
+  exportWrap: { position: "absolute", left: 0, top: 0, opacity: 0, zIndex: -1 },
+  exportCard: { width: 320, aspectRatio: 4 / 5, backgroundColor: "#000000", paddingHorizontal: 28, paddingVertical: 32, alignItems: "center" },
+  exportContent: { flex: 1, alignSelf: "stretch", alignItems: "center", justifyContent: "center" },
   shareButton: { alignSelf: "center", minHeight: 44, minWidth: 120, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, marginTop: 24 },
   shareText: { color: "#22C55E", fontSize: 18, fontWeight: "600", letterSpacing: 0.4 },
   newSessionButton: { alignSelf: "center", minHeight: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 12 },
