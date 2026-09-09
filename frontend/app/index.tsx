@@ -28,14 +28,15 @@ import {
 } from "react-native";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { RefObject } from "react";
+import { format, isSameDay } from "date-fns";
 
 import { storage } from "@/src/utils/storage";
 
 type Phase = "speak" | "processing" | "thing" | "session" | "card";
 type Alternative = { task: string; minutes: number; reason: string };
 type Task = { task: string; minutes: number; deferred: string[]; reason: string; alternatives: Alternative[] };
-type Sorted = { now: string[]; later: string[]; drop: string[] };
-type SessionCard = { task: string; durationSeconds: number; interruptions: string[]; deferredItems: string[]; sorted: Sorted };
+type HistoryEntry = { task: string; durationSeconds: number; capturedCount: number; completedAt: string };
+type DailyCard = { taskLines: string[]; extraTaskCount: number; totalSeconds: number; capturedCount: number };
 const webInputStyle = { outlineStyle: "none" } as unknown as TextStyle;
 const RECORDING_OPTIONS = { ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true };
 
@@ -95,9 +96,10 @@ const parseResponse = async <T,>(response: Response): Promise<T> => {
 };
 
 const formatDuration = (seconds: number) => {
-  const rounded = Math.max(0, Math.floor(seconds));
+  const rounded = Math.max(0, seconds);
   const hours = Math.floor(rounded / 3600);
-  const minutes = Math.floor((rounded % 3600) / 60);
+  const wholeMinutes = Math.floor((rounded % 3600) / 60);
+  const minutes = rounded > 0 && hours === 0 && wholeMinutes === 0 ? 1 : wholeMinutes;
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
 };
@@ -107,6 +109,19 @@ const formatTimer = (seconds: number) => {
   const minutes = Math.floor(safeSeconds / 60).toString().padStart(2, "0");
   const remainder = (safeSeconds % 60).toString().padStart(2, "0");
   return `${minutes}:${remainder}`;
+};
+
+const CARD_TASK_BUDGET = 4;
+
+const buildDailyCard = (history: HistoryEntry[]): DailyCard => {
+  const today = history.filter((entry) => isSameDay(new Date(entry.completedAt), new Date()));
+  const recent = today.slice(-CARD_TASK_BUDGET);
+  return {
+    taskLines: recent.map((entry) => entry.task),
+    extraTaskCount: Math.max(0, today.length - recent.length),
+    totalSeconds: today.reduce((sum, entry) => sum + entry.durationSeconds, 0),
+    capturedCount: today.reduce((sum, entry) => sum + entry.capturedCount, 0),
+  };
 };
 
 const EXAMPLE_PROMPTS = [
@@ -278,56 +293,28 @@ function SessionScreen({ task, remaining, plannedSeconds, count, onSubmit, onEnd
         {count > 0 ? <Text style={styles.deflected}>{count} saved for later</Text> : null}
       </View>
       <View style={[styles.sessionBottom, { paddingBottom: insets.bottom + 20 }]}>
-        <TextInput testID="interruption-input" value={draft} onChangeText={setDraft} onSubmitEditing={onSubmit} onBlur={Keyboard.dismiss} returnKeyType="done" placeholder="Something popped up? Drop it here" placeholderTextColor="#6B7280" style={[styles.captureInput, Platform.OS === "web" ? webInputStyle : null]} blurOnSubmit={false} />
+        <TextInput testID="interruption-input" value={draft} onChangeText={setDraft} onSubmitEditing={onSubmit} onBlur={Keyboard.dismiss} returnKeyType="done" placeholder="Something popped up? Drop it here" placeholderTextColor="#9CA3AF" style={[styles.captureInput, Platform.OS === "web" ? webInputStyle : null]} blurOnSubmit={false} />
         <Pressable testID="end-early" onPress={onEnd} style={({ pressed }) => [styles.endLink, pressed && styles.pressed]}><Text style={styles.endText}>End early</Text></Pressable>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
-function CardScreen({ card, insets, cardRef, onShare, onNewSession }: { card: SessionCard; insets: { top: number; bottom: number }; cardRef: RefObject<View | null>; onShare: () => void; onNewSession: () => void }) {
-  const savedMinutes = card.interruptions.length * 23;
-  const savedText = savedMinutes === 0 ? "0m" : formatDuration(savedMinutes * 60);
-  const allItems = [...card.sorted.now, ...card.sorted.later, ...card.sorted.drop];
-  const totalCount = allItems.length;
-  const budget = 4;
-  const visibleNow = card.sorted.now.slice(0, budget);
-  const remainingBudget = budget - visibleNow.length;
-  const visibleLater = card.sorted.later.slice(0, Math.max(0, remainingBudget));
-  const extra = totalCount - visibleNow.length - visibleLater.length;
+function CardScreen({ card, insets, cardRef, onShare, onNewSession }: { card: DailyCard; insets: { top: number; bottom: number }; cardRef: RefObject<View | null>; onShare: () => void; onNewSession: () => void }) {
+  const headerDate = format(new Date(), "EEE d MMM");
+  const focusedText = formatDuration(card.totalSeconds);
   return (
     <View style={[styles.cardScreen, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 }]} testID="card-screen">
       <View ref={cardRef} collapsable={false} style={styles.shareBody}>
         <View style={styles.shareBodyTop}>
-          <Text style={styles.cardTask} numberOfLines={2}>{card.task}</Text>
-          <View style={styles.statsBlock}>
-            <Text style={styles.cardNumber}>{formatDuration(card.durationSeconds)}</Text>
-            <Text style={styles.cardLabel}>focused</Text>
-            <Text style={styles.cardNumber}>{card.interruptions.length}</Text>
-            <Text style={styles.cardLabel}>captured</Text>
-            <Text style={styles.savedNumber}>{savedText}</Text>
-            <Text style={styles.cardLabel}>time saved</Text>
-            <Text style={styles.researchNote}>23 min per interruption — UC Irvine</Text>
+          <Text style={styles.cardHeader}>EXECUTED · {headerDate}</Text>
+          <View style={styles.taskList}>
+            {card.taskLines.map((text, index) => (
+              <Text key={`task-${index}`} style={styles.taskLine} numberOfLines={2}>✓ {text}</Text>
+            ))}
+            {card.extraTaskCount > 0 ? <Text style={styles.moreItems}>+{card.extraTaskCount} more</Text> : null}
           </View>
-          <View style={styles.listBlock}>
-            {visibleNow.length > 0 ? (
-              <View style={styles.groupBlock}>
-                <Text style={styles.listLabel}>NOW</Text>
-                {visibleNow.map((text, index) => (
-                  <Text key={`now-${index}`} style={styles.listItem}>{text}</Text>
-                ))}
-              </View>
-            ) : null}
-            {visibleLater.length > 0 ? (
-              <View style={styles.groupBlock}>
-                <Text style={styles.listLabel}>LATER</Text>
-                {visibleLater.map((text, index) => (
-                  <Text key={`later-${index}`} style={styles.listItem}>{text}</Text>
-                ))}
-              </View>
-            ) : null}
-            {extra > 0 ? <Text style={styles.moreItems}>+{extra} more</Text> : null}
-          </View>
+          <Text style={styles.statsLine}>{focusedText} focused · {card.capturedCount} things captured, 0 lost</Text>
         </View>
         <Text style={styles.wordmark}>Execute AI</Text>
       </View>
@@ -346,7 +333,7 @@ export default function Index() {
   const [phase, setPhase] = useState<Phase>("speak");
   const [anonymousId, setAnonymousId] = useState<string | null>(null);
   const [task, setTask] = useState<Task | null>(null);
-  const [card, setCard] = useState<SessionCard | null>(null);
+  const [card, setCard] = useState<DailyCard | null>(null);
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState("");
   const [amplitude, setAmplitude] = useState(0);
@@ -493,24 +480,20 @@ export default function Index() {
     const elapsed = Math.max(1, Math.min(plannedSeconds, Math.floor((Date.now() - sessionStartedAt.current) / 1000)));
     setPhase("processing");
     setProcessingLabel("");
-    let sorted: Sorted = { now: [], later: [], drop: [] };
-    const deferredItems = task.deferred;
-    const itemsToSort = [...interruptions, ...deferredItems];
-    if (itemsToSort.length > 0) {
-      try {
-        sorted = await parseResponse<Sorted>(await fetch(`${BACKEND_URL}/api/ai/sort`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task: task.task, interruptions: itemsToSort }) }));
-      } catch {
-        sorted = { now: [], later: itemsToSort, drop: [] };
-      }
-    }
-    const nextCard = { task: task.task, durationSeconds: elapsed, interruptions, deferredItems, sorted };
+    const entry: HistoryEntry = {
+      task: task.task,
+      durationSeconds: elapsed,
+      capturedCount: interruptions.length,
+      completedAt: new Date().toISOString(),
+    };
     const historyRaw = await storage.getItem(HISTORY_KEY, "[]");
-    let history: unknown[] = [];
-    try { history = JSON.parse(historyRaw || "[]") as unknown[]; } catch { history = []; }
-    await storage.setItem(HISTORY_KEY, JSON.stringify([...history, { ...nextCard, completedAt: new Date().toISOString() }]));
-    setCard(nextCard);
+    let history: HistoryEntry[] = [];
+    try { history = JSON.parse(historyRaw || "[]") as HistoryEntry[]; } catch { history = []; }
+    const updatedHistory = [...history, entry];
+    await storage.setItem(HISTORY_KEY, JSON.stringify(updatedHistory));
+    setCard(buildDailyCard(updatedHistory));
     setPhase("card");
-    track("session_completed", anonymousId, { duration_seconds: elapsed, captured: interruptions.length, deferred: deferredItems.length });
+    track("session_completed", anonymousId, { duration_seconds: elapsed, captured: interruptions.length });
   }, [anonymousId, interruptions, plannedSeconds, task]);
 
   useEffect(() => {
@@ -543,7 +526,7 @@ export default function Index() {
         const file = new File([blob], "execute-ai.png", { type: "image/png" });
         await navigator.share({ files: [file], title: "Execute AI" }).catch(() => undefined);
       }
-      track("card_shared", anonymousId, { captured: card?.interruptions.length ?? 0, deferred: card?.deferredItems.length ?? 0 });
+      track("card_shared", anonymousId, { captured: card?.capturedCount ?? 0 });
     } catch (shareError) {
       setError(shareError instanceof Error ? shareError.message : "Could not share the card");
     }
@@ -581,56 +564,50 @@ const styles = StyleSheet.create({
   prompt: { color: "#F5F5F5", fontSize: 20, fontWeight: "700", letterSpacing: 0.1, marginBottom: 36, textAlign: "center" },
   tagline: { color: "#D1D5DB", fontSize: 15, fontWeight: "500", letterSpacing: 0.2, marginTop: 28, textAlign: "center" },
   recordingTimer: { color: "#FFFFFF", fontSize: 15, fontWeight: "600", marginTop: 18, fontVariant: ["tabular-nums"], letterSpacing: 0.5 },
-  examplePrompt: { color: "#6B7280", fontSize: 12, fontWeight: "300", textAlign: "center", marginTop: 28, maxWidth: 280, lineHeight: 17 },
+  examplePrompt: { color: "#9CA3AF", fontSize: 12, fontWeight: "500", textAlign: "center", marginTop: 28, maxWidth: 280, lineHeight: 17 },
   errorBlock: { alignItems: "center", marginTop: 22 },
-  errorLine: { color: "#9CA3AF", fontSize: 13, fontWeight: "400", letterSpacing: 0.2, textAlign: "center", paddingHorizontal: 24 },
+  errorLine: { color: "#D1D5DB", fontSize: 13, fontWeight: "500", letterSpacing: 0.2, textAlign: "center", paddingHorizontal: 24 },
   retryButton: { minHeight: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 4 },
   retryText: { color: "#22C55E", fontSize: 14, fontWeight: "600", letterSpacing: 0.3 },
-  processingLabel: { color: "#9CA3AF", fontSize: 14, fontWeight: "400", marginTop: 20, textAlign: "center" },
+  processingLabel: { color: "#D1D5DB", fontSize: 14, fontWeight: "500", marginTop: 20, textAlign: "center" },
   micWrap: { alignItems: "center", justifyContent: "center" },
   pulsingRing: { position: "absolute", width: 120, height: 120, borderRadius: 60, borderWidth: 2, borderColor: "#22C55E" },
   thingScreen: { flex: 1, paddingHorizontal: 32 },
   thingHeader: { flex: 1, alignItems: "center", justifyContent: "center" },
   thingFooter: { alignItems: "center", paddingTop: 24 },
   minutesButton: { minHeight: 44, minWidth: 140, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, paddingVertical: 8, overflow: "hidden" },
-  minutesValue: { color: "#FFFFFF", fontSize: 22, fontWeight: "300", letterSpacing: 0.2, textAlign: "center", includeFontPadding: false },
+  minutesValue: { color: "#FFFFFF", fontSize: 22, fontWeight: "600", letterSpacing: 0.2, textAlign: "center", includeFontPadding: false },
   micButton: { width: 120, height: 120, borderRadius: 60, borderWidth: 2, borderColor: "#22C55E", alignItems: "center", justifyContent: "center" },
   micPulse: { position: "absolute", width: 116, height: 116, borderRadius: 58, backgroundColor: "#22C55E" },
   pressed: { opacity: 0.58 },
-  quietDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#6B7280" },
-  taskText: { color: "#FFFFFF", fontSize: 40, lineHeight: 48, fontWeight: "600", letterSpacing: -1.2, textAlign: "center", maxWidth: 340 },
-  reason: { color: "#6B7280", fontSize: 14, lineHeight: 20, fontWeight: "300", textAlign: "center", marginTop: 26, maxWidth: 280 },
+  quietDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#9CA3AF" },
+  taskText: { color: "#FFFFFF", fontSize: 40, lineHeight: 48, fontWeight: "700", letterSpacing: -1.2, textAlign: "center", maxWidth: 340 },
+  reason: { color: "#D1D5DB", fontSize: 14, lineHeight: 20, fontWeight: "500", textAlign: "center", marginTop: 26, maxWidth: 280 },
   textButton: { minHeight: 44, minWidth: 80, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 28 },
   startText: { color: "#22C55E", fontSize: 20, fontWeight: "600", letterSpacing: 0.4 },
   notThisOneButton: { minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 16 },
-  notThisOneText: { color: "#6B7280", fontSize: 13, fontWeight: "300" },
+  notThisOneText: { color: "#9CA3AF", fontSize: 13, fontWeight: "500" },
   sessionScreen: { flex: 1, backgroundColor: "#000000", paddingHorizontal: 32 },
-  sessionTask: { color: "#6B7280", fontSize: 14, fontWeight: "300", textAlign: "center", minHeight: 40 },
+  sessionTask: { color: "#D1D5DB", fontSize: 14, fontWeight: "500", textAlign: "center", minHeight: 40 },
   sessionCenter: { flex: 1, alignItems: "center", justifyContent: "center" },
   timerWrap: { width: 220, height: 220, alignItems: "center", justifyContent: "center" },
-  timerValue: { position: "absolute", color: "#FFFFFF", fontSize: 64, lineHeight: 72, fontWeight: "300", fontVariant: ["tabular-nums"], letterSpacing: -2 },
-  deflected: { color: "#6B7280", fontSize: 13, fontWeight: "300", marginTop: 26 },
+  timerValue: { position: "absolute", color: "#FFFFFF", fontSize: 64, lineHeight: 72, fontWeight: "700", fontVariant: ["tabular-nums"], letterSpacing: -2 },
+  deflected: { color: "#9CA3AF", fontSize: 13, fontWeight: "500", marginTop: 26 },
   sessionBottom: { alignItems: "center" },
-  captureInput: { width: "100%", minHeight: 48, color: "#FFFFFF", fontSize: 16, fontWeight: "300", textAlign: "center", paddingHorizontal: 4, paddingVertical: 10, borderWidth: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#6B7280" },
+  captureInput: { width: "100%", minHeight: 48, color: "#FFFFFF", fontSize: 16, fontWeight: "500", textAlign: "center", paddingHorizontal: 4, paddingVertical: 10, borderWidth: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#6B7280" },
   endLink: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, marginTop: 18 },
-  endText: { color: "#6B7280", fontSize: 13, fontWeight: "300" },
+  endText: { color: "#9CA3AF", fontSize: 13, fontWeight: "500" },
   cardScreen: { flex: 1, backgroundColor: "#000000", paddingHorizontal: 24, alignItems: "center" },
   shareBody: { flex: 1, alignSelf: "stretch", alignItems: "center", justifyContent: "space-between", backgroundColor: "#000000", paddingTop: 8, paddingBottom: 4 },
   shareBodyTop: { alignSelf: "stretch", alignItems: "center" },
-  cardTask: { color: "#6B7280", fontSize: 13, fontWeight: "300", textAlign: "center", marginBottom: 8, maxWidth: 300 },
-  statsBlock: { alignItems: "center", justifyContent: "center", marginTop: 4 },
-  cardNumber: { color: "#FFFFFF", fontSize: 40, lineHeight: 46, fontWeight: "300", letterSpacing: -1.6, textAlign: "center" },
-  savedNumber: { color: "#22C55E", fontSize: 52, lineHeight: 58, fontWeight: "300", letterSpacing: -2, textAlign: "center", marginTop: 14 },
-  cardLabel: { color: "#6B7280", fontSize: 11, fontWeight: "300", marginTop: 2, marginBottom: 6, textAlign: "center", letterSpacing: 0.4 },
-  researchNote: { color: "#6B7280", fontSize: 10, fontWeight: "300", marginTop: 6, textAlign: "center", letterSpacing: 0.3, opacity: 0.7 },
-  listBlock: { alignSelf: "stretch", alignItems: "flex-start", marginTop: 20, paddingHorizontal: 8 },
-  groupBlock: { alignSelf: "stretch", marginTop: 10 },
-  listItem: { color: "#FFFFFF", fontSize: 13, lineHeight: 20, fontWeight: "300", marginTop: 2, flexShrink: 1 },
-  listLabel: { color: "#6B7280", fontSize: 10, fontWeight: "600", letterSpacing: 1.4, marginBottom: 4 },
-  moreItems: { color: "#6B7280", fontSize: 11, fontWeight: "300", marginTop: 10, letterSpacing: 0.2 },
-  wordmark: { color: "#6B7280", fontSize: 11, fontWeight: "300", textAlign: "center", letterSpacing: 1.4 },
+  cardHeader: { color: "#F5F5F5", fontSize: 15, fontWeight: "700", letterSpacing: 1, textAlign: "center" },
+  taskList: { alignSelf: "stretch", alignItems: "flex-start", marginTop: 28, paddingHorizontal: 12 },
+  taskLine: { color: "#FFFFFF", fontSize: 17, lineHeight: 24, fontWeight: "600", marginTop: 8 },
+  statsLine: { color: "#D1D5DB", fontSize: 13, fontWeight: "500", letterSpacing: 0.2, textAlign: "center", marginTop: 28, paddingHorizontal: 12 },
+  moreItems: { color: "#9CA3AF", fontSize: 13, fontWeight: "500", marginTop: 8, letterSpacing: 0.2 },
+  wordmark: { color: "#9CA3AF", fontSize: 11, fontWeight: "600", textAlign: "center", letterSpacing: 1.4 },
   shareButton: { alignSelf: "center", minHeight: 44, minWidth: 120, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, marginTop: 24 },
   shareText: { color: "#22C55E", fontSize: 18, fontWeight: "600", letterSpacing: 0.4 },
   newSessionButton: { alignSelf: "center", minHeight: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 12 },
-  newSessionText: { color: "#6B7280", fontSize: 13, fontWeight: "300", letterSpacing: 0.3 },
+  newSessionText: { color: "#9CA3AF", fontSize: 13, fontWeight: "500", letterSpacing: 0.3 },
 });
