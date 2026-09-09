@@ -93,7 +93,7 @@ async def run_gemini(system_message: str, contents: List[Any]) -> str:
             try:
                 response = await asyncio.to_thread(
                     client.models.generate_content,
-                    model="gemini-flash-lite-latest",
+                    model="gemini-flash-latest",
                     contents=contents,
                     config=config,
                 )
