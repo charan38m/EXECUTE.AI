@@ -1,7 +1,8 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import {
-  RecordingPresets,
+  AudioQuality,
+  IOSOutputFormat,
   setAudioModeAsync,
   requestRecordingPermissionsAsync,
   useAudioRecorder,
@@ -38,7 +39,25 @@ type Task = { task: string; minutes: number; deferred: string[]; reason: string;
 type HistoryEntry = { task: string; durationSeconds: number; capturedCount: number; completedAt: string };
 type DailyCard = { taskLines: string[]; extraTaskCount: number; totalSeconds: number; capturedCount: number };
 const webInputStyle = { outlineStyle: "none" } as unknown as TextStyle;
-const RECORDING_OPTIONS = { ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true };
+// Mono, 16kHz, 64kbps AAC: the standard input shape for speech recognition.
+// Cuts the recorded file to roughly a quarter the size of the stereo/44.1kHz
+// default with no loss in transcription accuracy, so it uploads and processes faster.
+const RECORDING_OPTIONS = {
+  extension: ".m4a",
+  sampleRate: 16000,
+  numberOfChannels: 1,
+  bitRate: 64000,
+  android: { outputFormat: "mpeg4" as const, audioEncoder: "aac" as const },
+  ios: {
+    outputFormat: IOSOutputFormat.MPEG4AAC,
+    audioQuality: AudioQuality.MEDIUM,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
+  },
+  web: { mimeType: "audio/webm", bitsPerSecond: 64000 },
+  isMeteringEnabled: true,
+};
 
 type RecorderControllerHandle = {
   start: () => Promise<void>;
@@ -403,8 +422,7 @@ export default function Index() {
       } else {
         form.append("audio", { uri, name: "thought.m4a", type: "audio/m4a" } as unknown as Blob);
       }
-      const transcript = await parseResponse<{ transcript: string }>(await fetch(`${BACKEND_URL}/api/ai/transcribe`, { method: "POST", body: form }));
-      const selectedTask = await parseResponse<Task>(await fetch(`${BACKEND_URL}/api/ai/task`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript: transcript.transcript }) }));
+      const selectedTask = await parseResponse<Task>(await fetch(`${BACKEND_URL}/api/ai/task`, { method: "POST", body: form }));
       setTask(selectedTask);
       setPhase("thing");
     } catch (requestError) {
