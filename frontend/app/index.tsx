@@ -59,9 +59,7 @@ const RecorderController = forwardRef<RecorderControllerHandle, { onState: (isRe
     },
     stopAndRelease: async () => {
       if (recorder.isRecording) await recorder.stop();
-      const uri = recorder.uri;
-      recorder.release();
-      return uri;
+      return recorder.uri;
     },
   }), [recorder]);
 
@@ -111,6 +109,57 @@ const formatTimer = (seconds: number) => {
   return `${minutes}:${remainder}`;
 };
 
+const EXAMPLE_PROMPTS = [
+  "exam Friday, two assignments, gym, mom's asking about the trip, opened nothing all day",
+  "three client edits pending, invoice unsent, need to post today, phone won't stop",
+  "launch next week, no landing page, cofounder waiting on me, haven't eaten",
+];
+
+function ExamplePrompts() {
+  const [index, setIndex] = useState(0);
+  const opacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const timer = setInterval(() => {
+      Animated.timing(opacity, { toValue: 0, duration: 300, easing: Easing.in(Easing.ease), useNativeDriver: true }).start(() => {
+        setIndex((value) => (value + 1) % EXAMPLE_PROMPTS.length);
+        Animated.timing(opacity, { toValue: 1, duration: 300, easing: Easing.out(Easing.ease), useNativeDriver: true }).start();
+      });
+    }, 4200);
+    return () => clearInterval(timer);
+  }, [opacity]);
+  return (
+    <Animated.Text style={[styles.examplePrompt, { opacity }]} numberOfLines={2}>
+      {EXAMPLE_PROMPTS[index]}
+    </Animated.Text>
+  );
+}
+
+function PulsingRing({ active }: { active: boolean }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(0.5)).current;
+  useEffect(() => {
+    if (!active) {
+      scale.setValue(1);
+      opacity.setValue(0.5);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.parallel([
+        Animated.timing(scale, { toValue: 1.35, duration: 900, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0, duration: 900, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      scale.setValue(1);
+      opacity.setValue(0.5);
+    };
+  }, [active, scale, opacity]);
+  if (!active) return null;
+  return <Animated.View pointerEvents="none" style={[styles.pulsingRing, { opacity, transform: [{ scale }] }]} />;
+}
+
 function QuietDot() {
   const opacity = useRef(new Animated.Value(0.25)).current;
   useEffect(() => {
@@ -139,23 +188,40 @@ function TimerRing({ progress, value }: { progress: number; value: string }) {
   );
 }
 
-function SpeakScreen({ recording, amplitude, onPress, error }: { recording: boolean; amplitude: number; onPress: () => void; error: string }) {
+function SpeakScreen({ recording, amplitude, onPress, error, onRetry, recordingSeconds }: { recording: boolean; amplitude: number; onPress: () => void; error: string; onRetry: () => void; recordingSeconds: number }) {
   const pulse = Math.min(0.35, Math.max(0, amplitude / 160));
   return (
     <View style={styles.centerScreen} testID="speak-screen">
       <Text style={styles.prompt}>Speak your chaos</Text>
-      <Pressable testID="mic-button" accessibilityRole="button" accessibilityLabel={recording ? "Stop recording" : "Start recording"} onPress={onPress} style={({ pressed }) => [styles.micButton, pressed && styles.pressed]}>
-        <View style={[styles.micPulse, { opacity: recording ? 0.25 + pulse : 0 }]} />
-        <MaterialCommunityIcons name="microphone" size={30} color="#FFFFFF" />
-      </Pressable>
+      <View style={styles.micWrap}>
+        <PulsingRing active={recording} />
+        <Pressable testID="mic-button" accessibilityRole="button" accessibilityLabel={recording ? "Stop recording" : "Start recording"} onPress={onPress} style={({ pressed }) => [styles.micButton, pressed && styles.pressed]}>
+          <View style={[styles.micPulse, { opacity: recording ? 0.25 + pulse : 0 }]} />
+          <MaterialCommunityIcons name="microphone" size={30} color="#FFFFFF" />
+        </Pressable>
+      </View>
+      {recording ? <Text testID="recording-timer" style={styles.recordingTimer}>{formatTimer(recordingSeconds)}</Text> : null}
       <Text style={styles.tagline}>Get one thing. Execute it.</Text>
-      {error ? <Text style={styles.errorLine} testID="speak-error">{error}</Text> : null}
+      {!recording && !error ? <ExamplePrompts /> : null}
+      {error ? (
+        <View style={styles.errorBlock}>
+          <Text style={styles.errorLine} testID="speak-error">{error}</Text>
+          <Pressable testID="retry-button" accessibilityRole="button" accessibilityLabel="Retry" onPress={onRetry} style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}>
+            <Text style={styles.retryText}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
 
-function ProcessingScreen() {
-  return <View style={styles.centerScreen} testID="processing-screen"><QuietDot /></View>;
+function ProcessingScreen({ label }: { label?: string }) {
+  return (
+    <View style={styles.centerScreen} testID="processing-screen">
+      <QuietDot />
+      {label ? <Text style={styles.processingLabel}>{label}</Text> : null}
+    </View>
+  );
 }
 
 function ThingScreen({ task, onStart, onNotThisOne, insets }: { task: Task; onStart: (minutes: number) => void; onNotThisOne: () => void; insets: { bottom: number } }) {
@@ -269,7 +335,7 @@ function CardScreen({ card, insets, cardRef, onShare, onNewSession }: { card: Se
         <Text style={styles.shareText}>Share</Text>
       </Pressable>
       <Pressable testID="new-session-button" onPress={onNewSession} style={({ pressed }) => [styles.newSessionButton, pressed && styles.pressed]}>
-        <Text style={styles.newSessionText}>New session</Text>
+        <Text style={styles.newSessionText}>Start another</Text>
       </Pressable>
     </View>
   );
@@ -284,6 +350,8 @@ export default function Index() {
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState("");
   const [amplitude, setAmplitude] = useState(0);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [processingLabel, setProcessingLabel] = useState("");
   const [remaining, setRemaining] = useState(0);
   const [plannedSeconds, setPlannedSeconds] = useState(0);
   const [interruptions, setInterruptions] = useState<string[]>([]);
@@ -315,6 +383,19 @@ export default function Index() {
     setAmplitude(metering);
   }, []);
 
+  useEffect(() => {
+    if (!recording) {
+      setRecordingSeconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setRecordingSeconds(0);
+    const interval = setInterval(() => {
+      setRecordingSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 250);
+    return () => clearInterval(interval);
+  }, [recording]);
+
   const stopRecording = useCallback(async () => {
     if (recordingLifecycle.current !== "recording") return;
     recordingLifecycle.current = "stopping";
@@ -326,6 +407,7 @@ export default function Index() {
       setRecorderKey((value) => value + 1);
       if (!uri) throw new Error("No recording found");
       setPhase("processing");
+      setProcessingLabel("Finding your one thing");
       setError("");
       const form = new FormData();
       if (Platform.OS === "web") {
@@ -339,7 +421,8 @@ export default function Index() {
       setTask(selectedTask);
       setPhase("thing");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not understand that recording");
+      console.warn("stopRecording failed", requestError);
+      setError("Didn't catch that. Try again.");
       setPhase("speak");
     } finally {
       recordingLifecycle.current = "idle";
@@ -379,6 +462,11 @@ export default function Index() {
 
   const handleMic = () => { if (recording) void stopRecording(); else void startRecording(); };
 
+  const retryRecording = () => {
+    setError("");
+    void startRecording();
+  };
+
   const startSession = (minutes: number) => {
     if (!task) return;
     const seconds = minutes * 60;
@@ -404,6 +492,7 @@ export default function Index() {
     endingSession.current = true;
     const elapsed = Math.max(1, Math.min(plannedSeconds, Math.floor((Date.now() - sessionStartedAt.current) / 1000)));
     setPhase("processing");
+    setProcessingLabel("");
     let sorted: Sorted = { now: [], later: [], drop: [] };
     const deferredItems = task.deferred;
     const itemsToSort = [...interruptions, ...deferredItems];
@@ -469,11 +558,12 @@ export default function Index() {
     setPlannedSeconds(0);
     setRemaining(0);
     setError("");
+    setProcessingLabel("");
     endingSession.current = false;
   }, []);
 
-  let content = <ProcessingScreen />;
-  if (phase === "speak") content = <SpeakScreen recording={recording} amplitude={amplitude} onPress={handleMic} error={error} />;
+  let content = <ProcessingScreen label={processingLabel} />;
+  if (phase === "speak") content = <SpeakScreen recording={recording} amplitude={amplitude} onPress={handleMic} error={error} onRetry={retryRecording} recordingSeconds={recordingSeconds} />;
   if (phase === "thing" && task) content = <ThingScreen task={task} onStart={startSession} onNotThisOne={chooseNextTask} insets={insets} />;
   if (phase === "session" && task) content = <SessionScreen task={task} remaining={remaining} plannedSeconds={plannedSeconds} count={interruptions.length} onSubmit={addInterruption} onEnd={() => void finishSession()} draft={draft} setDraft={setDraft} insets={insets} />;
   if (phase === "card" && card) content = <CardScreen card={card} insets={insets} cardRef={cardRef} onShare={() => void shareCard()} onNewSession={resetToSpeak} />;
@@ -488,9 +578,17 @@ export default function Index() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000000" },
   centerScreen: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
-  prompt: { color: "#6B7280", fontSize: 14, fontWeight: "300", letterSpacing: 0.1, marginBottom: 42, textAlign: "center" },
-  tagline: { color: "#6B7280", fontSize: 13, fontWeight: "300", letterSpacing: 0.2, marginTop: 42, textAlign: "center" },
-  errorLine: { color: "#6B7280", fontSize: 12, fontWeight: "300", letterSpacing: 0.2, marginTop: 22, textAlign: "center", paddingHorizontal: 24 },
+  prompt: { color: "#F5F5F5", fontSize: 20, fontWeight: "700", letterSpacing: 0.1, marginBottom: 36, textAlign: "center" },
+  tagline: { color: "#D1D5DB", fontSize: 15, fontWeight: "500", letterSpacing: 0.2, marginTop: 28, textAlign: "center" },
+  recordingTimer: { color: "#FFFFFF", fontSize: 15, fontWeight: "600", marginTop: 18, fontVariant: ["tabular-nums"], letterSpacing: 0.5 },
+  examplePrompt: { color: "#6B7280", fontSize: 12, fontWeight: "300", textAlign: "center", marginTop: 28, maxWidth: 280, lineHeight: 17 },
+  errorBlock: { alignItems: "center", marginTop: 22 },
+  errorLine: { color: "#9CA3AF", fontSize: 13, fontWeight: "400", letterSpacing: 0.2, textAlign: "center", paddingHorizontal: 24 },
+  retryButton: { minHeight: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, marginTop: 4 },
+  retryText: { color: "#22C55E", fontSize: 14, fontWeight: "600", letterSpacing: 0.3 },
+  processingLabel: { color: "#9CA3AF", fontSize: 14, fontWeight: "400", marginTop: 20, textAlign: "center" },
+  micWrap: { alignItems: "center", justifyContent: "center" },
+  pulsingRing: { position: "absolute", width: 120, height: 120, borderRadius: 60, borderWidth: 2, borderColor: "#22C55E" },
   thingScreen: { flex: 1, paddingHorizontal: 32 },
   thingHeader: { flex: 1, alignItems: "center", justifyContent: "center" },
   thingFooter: { alignItems: "center", paddingTop: 24 },
