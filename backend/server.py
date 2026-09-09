@@ -91,14 +91,18 @@ def get_genai_client() -> genai.Client:
 
 async def run_gemini(system_message: str, contents: List[Any]) -> str:
     client = get_genai_client()
-    config = types.GenerateContentConfig(system_instruction=system_message, temperature=0.1)
+    config = types.GenerateContentConfig(
+        system_instruction=system_message,
+        temperature=0.1,
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
+    )
     async with gemini_lock:
         last_error: Exception | None = None
         for attempt in range(3):
             try:
                 response = await asyncio.to_thread(
                     client.models.generate_content,
-                    model="gemini-flash-latest",
+                    model="gemini-flash-lite-latest",
                     contents=contents,
                     config=config,
                 )
@@ -209,7 +213,7 @@ async def choose_task(request: TaskRequest):
         raise HTTPException(status_code=400, detail="Transcript is required")
     system_message = """You receive a person's spoken, unstructured list of everything on their mind.
 Return ONLY valid JSON, no markdown, no preamble:
-{"task":"<single most important task, max 8 words, in the language the user spoke>","minutes":<realistic integer>,"deferred":["<other items>"],"reason":"<max 12 words on why this one first>"}
+{"task":"<single most important task, in the user's own words exactly as they said it, max 8 words, in the language the user spoke>","minutes":<realistic integer>,"deferred":["<other items>"],"reason":"<max 12 words on why this one won>"}
 
 Rules for `deferred`:
 - Every item MUST be a CLEAN, REWRITTEN action phrase, max 6 words.
@@ -218,8 +222,12 @@ Rules for `deferred`:
 - If a chunk of transcript is filler, incomplete, or has no clear action, OMIT it entirely.
 - Return an empty deferred array rather than filler.
 
-Choose the primary task by: hard deadlines first, then highest consequence if missed, then what unblocks other work.
-Never return more than one task."""
+Choose the primary task using this order, stopping at the first rule that picks a clear winner:
+1. Whichever item has the soonest hard deadline.
+2. Whichever item unblocks the most other items on the list.
+3. Whichever item is smallest and fastest to actually finish.
+
+`task` must be the user's own words for that item, not a rewritten or cleaned-up version. Never return more than one task."""
     try:
         raw = await run_gemini(system_message, [request.transcript])
         payload = parse_json_object(raw)
