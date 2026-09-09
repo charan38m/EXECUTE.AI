@@ -194,9 +194,9 @@ async def choose_task(audio: UploadFile = File(...)):
             for item in deferred
         ]
         return TaskResponse(task=task, minutes=minutes, deferred=deferred, reason=reason, alternatives=alternatives)
-    except (HTTPException, KeyError, TypeError, ValueError) as exc:
+    except Exception as exc:
         logger.exception("Task selection failed")
-        raise HTTPException(status_code=503, detail="Could not pick a task; please try again") from exc
+        raise HTTPException(status_code=503, detail=f"DEBUG {type(exc).__name__}: {exc}") from exc
 
 
 @api_router.post("/ai/sort", response_model=SortResponse)
