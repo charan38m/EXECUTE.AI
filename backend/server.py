@@ -80,22 +80,29 @@ def get_genai_client() -> genai.Client:
     return _genai_client
 
 
+GEMINI_CALL_TIMEOUT_SECONDS = 15
+
+
 async def run_gemini(system_message: str, contents: List[Any]) -> str:
     client = get_genai_client()
     config = types.GenerateContentConfig(
         system_instruction=system_message,
         temperature=0.1,
         thinking_config=types.ThinkingConfig(thinking_budget=0),
+        http_options=types.HttpOptions(timeout=GEMINI_CALL_TIMEOUT_SECONDS * 1000),
     )
     async with gemini_lock:
         last_error: Exception | None = None
         for attempt in range(3):
             try:
-                response = await asyncio.to_thread(
-                    client.models.generate_content,
-                    model="gemini-flash-latest",
-                    contents=contents,
-                    config=config,
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        client.models.generate_content,
+                        model="gemini-flash-latest",
+                        contents=contents,
+                        config=config,
+                    ),
+                    timeout=GEMINI_CALL_TIMEOUT_SECONDS,
                 )
                 return (response.text or "").strip()
             except Exception as exc:
