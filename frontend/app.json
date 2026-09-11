@@ -16,7 +16,16 @@
     },
     "android": {
       "permissions": [
-        "RECORD_AUDIO"
+        "RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
@@ -53,7 +62,18 @@
       "typedRoutes": true
     },
     "extra": {
-      "backendUrl": "https://execute-ai.onrender.com"
+      "backendUrl": "https://execute-ai.onrender.com",
+      "router": {},
+      "eas": {
+        "projectId": "413ef3c0-0f4f-4f7c-9863-e67257363753"
+      }
+    },
+    "owner": "executeai-charan38m",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/413ef3c0-0f4f-4f7c-9863-e67257363753"
     }
   }
 }
