@@ -98,7 +98,7 @@ async def run_gemini(system_message: str, contents: List[Any]) -> str:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
                         client.models.generate_content,
-                        model="gemini-2.5-flash",
+                        model="gemini-3.6-flash",
                         contents=contents,
                         config=config,
                     ),
@@ -203,7 +203,7 @@ async def choose_task(audio: UploadFile = File(...)):
         return TaskResponse(task=task, minutes=minutes, deferred=deferred, reason=reason, alternatives=alternatives)
     except Exception as exc:
         logger.exception("Task selection failed")
-        raise HTTPException(status_code=503, detail=f"DEBUG2 {type(exc).__name__}: {exc} | cause={exc.__cause__}") from exc
+        raise HTTPException(status_code=503, detail="Could not pick a task; please try again") from exc
 
 
 @api_router.post("/ai/sort", response_model=SortResponse)
