@@ -307,7 +307,7 @@ function SessionScreen({ task, remaining, plannedSeconds, count, onSubmit, onEnd
   useKeepAwake("execute-ai-session");
   const progress = plannedSeconds > 0 ? remaining / plannedSeconds : 0;
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.sessionScreen} testID="session-screen">
+    <KeyboardAvoidingView behavior="padding" style={styles.sessionScreen} testID="session-screen">
       <Text style={[styles.sessionTask, { marginTop: insets.top + 16 }]} numberOfLines={2}>{task.task}</Text>
       <View style={styles.sessionCenter}>
         <TimerRing progress={progress} value={formatTimer(remaining)} />
